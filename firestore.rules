@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /facilities/{facilityId} {
+      allow read, write: if true;
+      match /{collection}/{documentId} {
+        allow read, write: if collection in [
+          'survey_pdfs', 'drawings', 'documentations', 'reports', 'price_list',
+          'schedule_maintenance', 'scheduled_tasks', 'preventive_maintenance',
+          'vendors', 'equipment_supplied', 'inventory', 'requests', 'work_orders',
+          'kpis', 'users', 'locations', 'maintenance_settings', 'predefined_tasks',
+          'scheduled_tasks_attachments'
+        ];
+      }
+    }
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
