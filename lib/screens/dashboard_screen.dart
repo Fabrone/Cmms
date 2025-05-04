@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cmms/authentication/registration_screen.dart';
+import 'package:cmms/authentication/login_screen.dart';
 import 'package:cmms/screens/developer_screen.dart';
 import 'package:logger/logger.dart';
 
@@ -19,22 +19,107 @@ class DashboardScreenState extends State<DashboardScreen> {
   final logger = Logger(printer: PrettyPrinter());
   final TextEditingController _uidController = TextEditingController();
   final TextEditingController _seniorFMManagerUidController = TextEditingController();
+  String? _currentRole;
+  bool _isDeveloper = false;
 
-  Future<bool> _isDeveloper() async {
-    if (FirebaseAuth.instance.currentUser == null) return false;
-    DocumentSnapshot developerDoc = await FirebaseFirestore.instance
+  @override
+  void initState() {
+    super.initState();
+    _currentRole = widget.role;
+    _initializeRoleListeners();
+  }
+
+  Future<void> _initializeRoleListeners() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _redirectToLogin('No user logged in');
+      return;
+    }
+
+    // Check initial Developer status
+    final developerDoc = await FirebaseFirestore.instance
         .collection('Developers')
-        .doc(FirebaseAuth.instance.currentUser!.uid)
+        .doc(user.uid)
         .get();
-    return developerDoc.exists;
+    if (mounted) {
+      setState(() {
+        _isDeveloper = developerDoc.exists;
+      });
+    }
+
+    // Listen to role changes
+    _listenToRoleChanges(user.uid);
+  }
+
+  void _listenToRoleChanges(String uid) {
+    // Role collections
+    const roleCollections = [
+      'MainAdmins',
+      'SeniorFMManagers',
+      'Technicians',
+      'Requesters',
+      'AuditorsInspectors',
+      'Developers'
+    ];
+
+    for (String collection in roleCollections) {
+      FirebaseFirestore.instance
+          .collection(collection)
+          .doc(uid)
+          .snapshots()
+          .listen((snapshot) {
+        if (mounted) {
+          setState(() {
+            if (snapshot.exists) {
+              _currentRole = collection == 'Developers' ? 'Developer' : collection.replaceAll('s', '');
+              if (collection == 'Developers') {
+                _isDeveloper = true;
+              }
+            } else if (collection == 'Developers') {
+              _isDeveloper = false;
+            }
+          });
+        }
+      }, onError: (e) => logger.e('Error listening to $collection role: $e'));
+    }
+
+    // Listen to auth state
+    FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user == null && mounted) {
+        _redirectToLogin('User logged out');
+      }
+    });
+  }
+
+  Future<void> _redirectToLogin(String message) async {
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
   }
 
   Future<void> _handleLogout() async {
-    await FirebaseAuth.instance.signOut();
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (context) => const RegistrationScreen()),
-    );
+    try {
+      await FirebaseAuth.instance.signOut();
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error logging out: $e')),
+        );
+      }
+      logger.e('Error logging out: $e');
+    }
   }
 
   Future<void> _assignRole(String uid, String collection, {String? seniorFMManagerUid}) async {
@@ -317,33 +402,43 @@ class DashboardScreenState extends State<DashboardScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isTabletOrWeb = screenWidth > 600;
     final contentWidth = screenWidth > 800 ? screenWidth * 0.6 : screenWidth * 0.9;
-    final displayRole = widget.role == 'Developer' ? 'User' : widget.role;
+    final displayRole = _currentRole == 'Developer' ? 'User' : (_currentRole ?? 'User');
 
     return Scaffold(
-      appBar: AppBar(
-        leading: isTabletOrWeb
-            ? null
-            : IconButton(
-                icon: const Icon(Icons.menu, color: Colors.white),
-                onPressed: () => Scaffold.of(context).openDrawer(),
-              ),
-        title: Text(
-          displayRole,
-          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-        ),
-        backgroundColor: Colors.blueGrey,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: _handleLogout,
-            tooltip: 'Log Out',
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(80.0), // Increased AppBar height
+        child: AppBar(
+          leading: isTabletOrWeb
+              ? null
+              : Builder(
+                  builder: (context) => IconButton(
+                    icon: const Icon(Icons.menu, color: Colors.white, size: 40), // Larger menu icon
+                    onPressed: () => Scaffold.of(context).openDrawer(),
+                    tooltip: 'Open Menu',
+                  ),
+                ),
+          title: Text(
+            displayRole,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+              fontSize: 24, // Larger font size
+            ),
           ),
-        ],
+          backgroundColor: Colors.blueGrey,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.logout, color: Colors.white, size: 40), // Larger logout icon
+              onPressed: _handleLogout,
+              tooltip: 'Log Out',
+            ),
+          ],
+        ),
       ),
-      drawer: isTabletOrWeb ? null : _buildDrawer(context),
+      drawer: isTabletOrWeb ? null : _buildDrawer(),
       body: Row(
         children: [
-          if (isTabletOrWeb) _buildSidebar(context),
+          if (isTabletOrWeb) _buildSidebar(),
           Expanded(
             child: SafeArea(
               child: Center(
@@ -370,7 +465,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 30),
-                        if (widget.role == 'MainAdmin') ...[
+                        if (_currentRole == 'MainAdmin') ...[
                           _buildActionCard(
                             title: 'Assign Senior FM Manager',
                             icon: Icons.supervisor_account,
@@ -415,11 +510,11 @@ class DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildDrawer(BuildContext context) {
+  Widget _buildDrawer() {
     return Drawer(
       child: Column(
         children: [
-          _buildAppIcon(context),
+          _buildAppIcon(),
           ListTile(
             leading: const Icon(Icons.apartment, color: Colors.blueGrey),
             title: const Text('Facilities'),
@@ -453,13 +548,13 @@ class DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildSidebar(BuildContext context) {
+  Widget _buildSidebar() {
     return Container(
       width: 250,
       color: Colors.blueGrey[50],
       child: Column(
         children: [
-          _buildAppIcon(context),
+          _buildAppIcon(),
           ListTile(
             leading: const Icon(Icons.apartment, color: Colors.blueGrey),
             title: const Text('Facilities'),
@@ -485,31 +580,25 @@ class DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildAppIcon(BuildContext context) {
-    return FutureBuilder<bool>(
-      future: _isDeveloper(),
-      builder: (context, snapshot) {
-        bool isDeveloper = snapshot.data ?? false;
-        return Container(
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          child: GestureDetector(
-            onTap: isDeveloper
-                ? () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const DeveloperScreen()),
-                    );
-                  }
-                : null,
-            child: Image.asset(
-              'assets/icons/icon.png',
-              width: 60,
-              height: 60,
-              color: isDeveloper ? null : Colors.grey,
-            ),
-          ),
-        );
-      },
+  Widget _buildAppIcon() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: GestureDetector(
+        onTap: _isDeveloper
+            ? () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const DeveloperScreen()),
+                );
+              }
+            : null,
+        child: Image.asset(
+          'assets/icons/icon.png',
+          width: 60,
+          height: 60,
+          color: _isDeveloper ? null : Colors.grey,
+        ),
+      ),
     );
   }
 
