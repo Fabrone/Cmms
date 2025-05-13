@@ -1,6 +1,7 @@
+import 'package:cmms/authentication/login_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cmms/authentication/registration_screen.dart';
+//import 'package:cmms/authentication/registration_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   final String facilityId;
@@ -11,7 +12,7 @@ class HomeScreen extends StatelessWidget {
     await FirebaseAuth.instance.signOut();
     if (!context.mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (context) => const RegistrationScreen()),
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
     );
   }
 
