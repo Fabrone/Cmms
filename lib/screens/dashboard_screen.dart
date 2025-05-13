@@ -54,7 +54,7 @@ class DashboardScreenState extends State<DashboardScreen> {
   void _listenToRoleChanges(String uid) {
     // Role collections
     const roleCollections = [
-      'MainAdmins',
+      'Admins',
       'SeniorFMManagers',
       'Technicians',
       'Requesters',
@@ -71,7 +71,8 @@ class DashboardScreenState extends State<DashboardScreen> {
         if (mounted) {
           setState(() {
             if (snapshot.exists) {
-              _currentRole = collection == 'Developers' ? 'Developer' : collection.replaceAll('s', '');
+              _currentRole = collection == 'Developers' ? 'Developer' : 
+                            collection == 'Admins' ? 'MainAdmin' : collection.replaceAll('s', '');
               if (collection == 'Developers') {
                 _isDeveloper = true;
               }
@@ -397,6 +398,49 @@ class DashboardScreenState extends State<DashboardScreen> {
     super.dispose();
   }
 
+  // Define menu items for each role
+  final Map<String, List<Map<String, dynamic>>> _roleMenuItems = {
+    'SeniorFMManager': [
+      {'title': 'Building Survey', 'icon': Icons.assessment},
+      {'title': 'Documentations', 'icon': Icons.description},
+      {'title': 'Drawings', 'icon': Icons.brush},
+      {'title': 'Scheduled Maintenance', 'icon': Icons.event},
+      {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
+      {'title': 'Reports', 'icon': Icons.bar_chart},
+      {'title': 'Price List', 'icon': Icons.attach_money},
+      {'title': 'Requests', 'icon': Icons.request_page},
+      {'title': 'Work Orders', 'icon': Icons.work},
+      {'title': 'Equipment Supplied', 'icon': Icons.construction},
+      {'title': 'Inventory and Parts', 'icon': Icons.inventory},
+      {'title': 'Vendors', 'icon': Icons.store},
+      {'title': 'Users', 'icon': Icons.group},
+      {'title': 'KPIs', 'icon': Icons.trending_up},
+    ],
+    'Technician': [
+      {'title': 'Scheduled Maintenance', 'icon': Icons.event},
+      {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
+      {'title': 'Reports', 'icon': Icons.bar_chart},
+      {'title': 'Price List', 'icon': Icons.attach_money},
+      {'title': 'Requests', 'icon': Icons.request_page},
+      {'title': 'Work Orders', 'icon': Icons.work},
+      {'title': 'Equipment Supplied', 'icon': Icons.construction},
+      {'title': 'Inventory and Parts', 'icon': Icons.inventory},
+    ],
+    'Requester': [
+      {'title': 'Scheduled Maintenance', 'icon': Icons.event},
+      {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
+      {'title': 'Reports', 'icon': Icons.bar_chart},
+      {'title': 'Price List', 'icon': Icons.attach_money},
+      {'title': 'Requests', 'icon': Icons.request_page},
+      {'title': 'Work Orders', 'icon': Icons.work},
+    ],
+    'AuditorInspector': [
+      {'title': 'Reports/KPIs', 'icon': Icons.bar_chart},
+      {'title': 'Equipment Supplied', 'icon': Icons.construction},
+      {'title': 'Inventory and Parts', 'icon': Icons.inventory},
+    ],
+  };
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -406,13 +450,13 @@ class DashboardScreenState extends State<DashboardScreen> {
 
     return Scaffold(
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(80.0), // Increased AppBar height
+        preferredSize: const Size.fromHeight(80.0),
         child: AppBar(
           leading: isTabletOrWeb
               ? null
               : Builder(
                   builder: (context) => IconButton(
-                    icon: const Icon(Icons.menu, color: Colors.white, size: 40), // Larger menu icon
+                    icon: const Icon(Icons.menu, color: Colors.white, size: 40),
                     onPressed: () => Scaffold.of(context).openDrawer(),
                     tooltip: 'Open Menu',
                   ),
@@ -422,13 +466,13 @@ class DashboardScreenState extends State<DashboardScreen> {
             style: const TextStyle(
               fontWeight: FontWeight.bold,
               color: Colors.white,
-              fontSize: 24, // Larger font size
+              fontSize: 24,
             ),
           ),
           backgroundColor: Colors.blueGrey,
           actions: [
             IconButton(
-              icon: const Icon(Icons.logout, color: Colors.white, size: 40), // Larger logout icon
+              icon: const Icon(Icons.logout, color: Colors.white, size: 40),
               onPressed: _handleLogout,
               tooltip: 'Log Out',
             ),
@@ -515,34 +559,7 @@ class DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         children: [
           _buildAppIcon(),
-          ListTile(
-            leading: const Icon(Icons.apartment, color: Colors.blueGrey),
-            title: const Text('Facilities'),
-            onTap: () {
-              Navigator.pop(context);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.location_on, color: Colors.blueGrey),
-            title: const Text('Locations'),
-            onTap: () {
-              Navigator.pop(context);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.assessment, color: Colors.blueGrey),
-            title: const Text('Building Survey'),
-            onTap: () {
-              Navigator.pop(context);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.event, color: Colors.blueGrey),
-            title: const Text('Schedule Maintenance'),
-            onTap: () {
-              Navigator.pop(context);
-            },
-          ),
+          ..._buildMenuItems(),
         ],
       ),
     );
@@ -555,29 +572,27 @@ class DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         children: [
           _buildAppIcon(),
-          ListTile(
-            leading: const Icon(Icons.apartment, color: Colors.blueGrey),
-            title: const Text('Facilities'),
-            onTap: () {},
-          ),
-          ListTile(
-            leading: const Icon(Icons.location_on, color: Colors.blueGrey),
-            title: const Text('Locations'),
-            onTap: () {},
-          ),
-          ListTile(
-            leading: const Icon(Icons.assessment, color: Colors.blueGrey),
-            title: const Text('Building Survey'),
-            onTap: () {},
-          ),
-          ListTile(
-            leading: const Icon(Icons.event, color: Colors.blueGrey),
-            title: const Text('Schedule Maintenance'),
-            onTap: () {},
-          ),
+          ..._buildMenuItems(),
         ],
       ),
     );
+  }
+
+  List<Widget> _buildMenuItems() {
+    final role = _currentRole ?? 'User';
+    final menuItems = _roleMenuItems[role] ?? [];
+
+    return menuItems.map((item) {
+      return ListTile(
+        leading: Icon(item['icon'], color: Colors.blueGrey),
+        title: Text(item['title']),
+        onTap: () {
+          if (role != 'MainAdmin' && role != 'Developer') {
+            Navigator.pop(context); // Close drawer for non-MainAdmin/Developer roles
+          }
+        },
+      );
+    }).toList();
   }
 
   Widget _buildAppIcon() {
@@ -596,7 +611,6 @@ class DashboardScreenState extends State<DashboardScreen> {
           'assets/icons/icon.png',
           width: 60,
           height: 60,
-          color: _isDeveloper ? null : Colors.grey,
         ),
       ),
     );
