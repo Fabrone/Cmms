@@ -29,10 +29,17 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
   Future<void> _assignRole(String uid, String collection, String role) async {
     try {
       final userDoc = await _firestore.collection('Users').doc(uid).get();
-      if (!userDoc.exists) throw 'User not found';
+      if (!userDoc.exists) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('User not found')),
+          );
+        }
+        return;
+      }
 
       final userData = userDoc.data() as Map<String, dynamic>;
-      if (userData['role'] != null) {
+      if (userData['role'] != '-') {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('User already has a role: ${userData['role']}')),
@@ -58,8 +65,28 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
         'isDisabled': false,
       };
 
+      // Write to role collection
       await _firestore.collection(collection).doc(uid).set(roleData);
-      await _firestore.collection('Users').doc(uid).update({'role': role});
+      logger.i('Successfully added user $uid to $collection collection');
+
+      // Update Users collection with role
+      try {
+        await _firestore.collection('Users').doc(uid).update({'role': role});
+        logger.i('Successfully updated role to $role for user $uid in Users collection');
+      } catch (e) {
+        logger.e('Failed to update role in Users collection: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$role role assigned to $collection, but failed to update user role: $e'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Log the activity
       await _logActivity('Assigned $role role to $uid (User: ${userData['username']})');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -98,8 +125,28 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
     if (confirm != true) return;
 
     try {
+      // Delete from Admins collection
       await _firestore.collection('Admins').doc(uid).delete();
-      await _firestore.collection('Users').doc(uid).update({'role': FieldValue.delete()});
+      logger.i('Successfully removed user $uid from Admins collection');
+
+      // Update Users collection to remove role
+      try {
+        await _firestore.collection('Users').doc(uid).update({'role': '-'});
+        logger.i('Successfully reset role for user $uid in Users collection');
+      } catch (e) {
+        logger.e('Failed to reset role in Users collection: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Admin removed, but failed to update user role: $e'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Log the activity
       await _logActivity('Removed Admin role from $uid (User: $username)');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -109,8 +156,8 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error removing admin: $e')),
-        );
+        SnackBar(content: Text('Error removing admin: $e')),
+      );
       }
       logger.e('Error removing admin: $e');
     }
@@ -147,8 +194,28 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
     if (confirm != true) return;
 
     try {
+      // Delete from Developers collection
       await _firestore.collection('Developers').doc(uid).delete();
-      await _firestore.collection('Users').doc(uid).update({'role': FieldValue.delete()});
+      logger.i('Successfully removed user $uid from Developers collection');
+
+      // Update Users collection to remove role
+      try {
+        await _firestore.collection('Users').doc(uid).update({'role': '-'});
+        logger.i('Successfully reset role for user $uid in Users collection');
+      } catch (e) {
+        logger.e('Failed to reset role in Users collection: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Developer removed, but failed to update user role: $e'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Log the activity
       await _logActivity('Removed Developer role from $uid (User: $username)');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -158,7 +225,7 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-           SnackBar(content: Text('Error removing developer: $e')),
+          SnackBar(content: Text('Error removing developer: $e')),
         );
       }
       logger.e('Error removing developer: $e');
@@ -330,7 +397,7 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
                   return const Text('No users found.');
                 }
                 final users = snapshot.data!.docs
-                    .where((doc) => (doc.data() as Map<String, dynamic>)['role'] == null)
+                    .where((doc) => (doc.data() as Map<String, dynamic>)['role'] == '-')
                     .toList();
                 if (users.isEmpty) {
                   return const Text('No eligible users found.');
@@ -513,10 +580,10 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
           ? FloatingActionButton(
               onPressed: () => _showAssignRoleDialog(
                 widget.collectionName,
-                widget.collectionName == 'Admins' ? 'Admin' : 'Developer',
+                widget.collectionName == 'Admins' ? 'Admin' : 'Technician',
               ),
               backgroundColor: Colors.blueGrey,
-              tooltip: 'Assign ${widget.collectionName == 'Admins' ? 'Admin' : 'Developer'}',
+              tooltip: 'Assign ${widget.collectionName == 'Admins' ? 'Admin' : 'Technician'}',
               child: const Icon(Icons.add),
             )
           : null,

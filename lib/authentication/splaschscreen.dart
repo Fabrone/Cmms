@@ -3,8 +3,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cmms/authentication/registration_screen.dart';
-import 'package:cmms/authentication/homescreen.dart';
-import 'package:cmms/authentication/login_screen.dart';
+import 'package:cmms/screens/dashboard_screen.dart';
+import 'package:logger/logger.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -18,6 +18,8 @@ class SplashScreenState extends State<SplashScreen> with TickerProviderStateMixi
   late Animation<double> _damageOpacityAnimation;
   late Animation<double> _repairScaleAnimation;
   late Animation<double> _textFadeAnimation;
+  final Logger _logger = Logger(printer: PrettyPrinter());
+  String? _currentRole;
 
   @override
   void initState() {
@@ -51,147 +53,98 @@ class SplashScreenState extends State<SplashScreen> with TickerProviderStateMixi
     _controller.forward();
 
     SchedulerBinding.instance.addPostFrameCallback((_) {
-      Future.delayed(const Duration(seconds: 5), () {
-        if (mounted) {
-          _navigateBasedOnAuthState();
-        }
-      });
+      _initializeAuthAndRoleCheck();
     });
   }
 
-  Future<void> _navigateBasedOnAuthState() async {
+  Future<void> _initializeAuthAndRoleCheck() async {
     User? user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      // Unauthenticated, navigate to RegistrationScreen
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const RegistrationScreen()),
-        );
-      }
+      _navigateToRegistration('No user logged in');
       return;
     }
 
-    try {
-      // Check if user exists in Users collection
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('Users')
-          .doc(user.uid)
-          .get();
+    // Check if user exists in Users collection
+    DocumentSnapshot userDoc = await FirebaseFirestore.instance
+        .collection('Users')
+        .doc(user.uid)
+        .get();
 
-      if (!userDoc.exists) {
-        // Not in Users, navigate to RegistrationScreen
+    if (!userDoc.exists) {
+      _navigateToRegistration('User not registered');
+      return;
+    }
+
+    // Initialize role listeners
+    _listenToRoleChanges(user.uid);
+
+    // Delay navigation slightly to allow initial role check
+    await Future.delayed(const Duration(seconds: 5));
+    _navigateBasedOnRole();
+  }
+
+  void _listenToRoleChanges(String uid) {
+    const roleCollections = ['Admins', 'Developers', 'Technicians'];
+
+    for (String collection in roleCollections) {
+      FirebaseFirestore.instance
+          .collection(collection)
+          .doc(uid)
+          .snapshots()
+          .listen((snapshot) {
         if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const RegistrationScreen()),
-          );
+          setState(() {
+            if (snapshot.exists) {
+              _currentRole = collection == 'Admins'
+                  ? 'MainAdmin'
+                  : collection == 'Developers'
+                      ? 'Developer'
+                      : 'Technician';
+            } else if (_currentRole == (collection == 'Admins'
+                    ? 'MainAdmin'
+                    : collection == 'Developers'
+                        ? 'Developer'
+                        : 'Technician')) {
+              _currentRole = 'User';
+            }
+          });
+          _navigateBasedOnRole();
         }
-        return;
+      }, onError: (e) {
+        _logger.e('Error listening to $collection role: $e');
+      });
+    }
+
+    // Listen to auth state
+    FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user == null && mounted) {
+        _navigateToRegistration('User logged out');
       }
+    });
+  }
 
-      // Check for roles
-      DocumentSnapshot developerDoc = await FirebaseFirestore.instance
-          .collection('Developers')
-          .doc(user.uid)
-          .get();
+  void _navigateBasedOnRole() {
+    if (!mounted) return;
 
-      if (developerDoc.exists) {
-        // Developer, navigate to LoginScreen
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const LoginScreen()),
-          );
-        }
-        return;
-      }
+    // Navigate to DashboardScreen with the current role
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => DashboardScreen(
+          facilityId: 'facility1',
+          role: _currentRole ?? 'User',
+        ),
+      ),
+    );
+  }
 
-      DocumentSnapshot adminDoc = await FirebaseFirestore.instance
-          .collection('Admins')
-          .doc(user.uid)
-          .get();
-
-      if (adminDoc.exists) {
-        // MainAdmin, navigate to LoginScreen
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const LoginScreen()),
-          );
-        }
-        return;
-      }
-
-      DocumentSnapshot seniorFMManagerDoc = await FirebaseFirestore.instance
-          .collection('SeniorFMManagers')
-          .doc(user.uid)
-          .get();
-
-      if (seniorFMManagerDoc.exists) {
-        // SeniorFMManager, navigate to LoginScreen
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const LoginScreen()),
-          );
-        }
-        return;
-      }
-
-      DocumentSnapshot technicianDoc = await FirebaseFirestore.instance
-          .collection('Technicians')
-          .doc(user.uid)
-          .get();
-
-      if (technicianDoc.exists) {
-        // Technician, navigate to LoginScreen
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const LoginScreen()),
-          );
-        }
-        return;
-      }
-
-      DocumentSnapshot requesterDoc = await FirebaseFirestore.instance
-          .collection('Requesters')
-          .doc(user.uid)
-          .get();
-
-      if (requesterDoc.exists) {
-        // Requester, navigate to LoginScreen
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const LoginScreen()),
-          );
-        }
-        return;
-      }
-
-      DocumentSnapshot auditorInspectorDoc = await FirebaseFirestore.instance
-          .collection('AuditorsInspectors')
-          .doc(user.uid)
-          .get();
-
-      if (auditorInspectorDoc.exists) {
-        // Auditor/Inspector, navigate to LoginScreen
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const LoginScreen()),
-          );
-        }
-        return;
-      }
-
-      // No role assigned, navigate to HomeScreen
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const HomeScreen(facilityId: 'facility1')),
-        );
-      }
-    } catch (e) {
-      // Fallback to RegistrationScreen on error
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const RegistrationScreen()),
-        );
-      }
+  void _navigateToRegistration(String message) {
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const RegistrationScreen()),
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     }
   }
 

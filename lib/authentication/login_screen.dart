@@ -48,15 +48,6 @@ class LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      DocumentSnapshot seniorFMManagerDoc = await FirebaseFirestore.instance
-          .collection('SeniorFMManagers')
-          .doc(user.uid)
-          .get();
-      if (seniorFMManagerDoc.exists) {
-        setState(() => _userRole = 'Senior FM Manager');
-        return;
-      }
-
       DocumentSnapshot technicianDoc = await FirebaseFirestore.instance
           .collection('Technicians')
           .doc(user.uid)
@@ -66,23 +57,7 @@ class LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      DocumentSnapshot requesterDoc = await FirebaseFirestore.instance
-          .collection('Requesters')
-          .doc(user.uid)
-          .get();
-      if (requesterDoc.exists) {
-        setState(() => _userRole = 'Requester');
-        return;
-      }
-
-      DocumentSnapshot auditorInspectorDoc = await FirebaseFirestore.instance
-          .collection('AuditorsInspectors')
-          .doc(user.uid)
-          .get();
-      if (auditorInspectorDoc.exists) {
-        setState(() => _userRole = 'Auditor/Inspector');
-        return;
-      }
+      setState(() => _userRole = 'User');
     } catch (e) {
       setState(() => _errorMessage = 'Error fetching role: $e');
     }
@@ -107,7 +82,7 @@ class LoginScreenState extends State<LoginScreen> {
           MaterialPageRoute(
             builder: (context) => DashboardScreen(
               facilityId: 'facility1',
-              role: _userRole ?? 'Unknown',
+              role: _userRole ?? 'User',
             ),
           ),
         );
@@ -160,7 +135,7 @@ class LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 20),
                     if (_userRole != null)
                       Text(
-                        'You have been assigned the $_userRole role.',
+                        'You have been assigned the ${_userRole == 'MainAdmin' ? 'Admin' : _userRole == 'Developer' ? 'Technician' : _userRole} role.',
                         style: const TextStyle(fontSize: 16, color: Colors.blueGrey, fontWeight: FontWeight.w500),
                         textAlign: TextAlign.center,
                       ),
