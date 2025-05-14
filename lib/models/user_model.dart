@@ -5,14 +5,14 @@ class UserModel {
   final String username;
   final String email;
   final DateTime createdAt;
-  final bool isInvited;
+  final String role;
 
   UserModel({
     required this.id,
     required this.username,
     required this.email,
     required this.createdAt,
-    required this.isInvited,
+    required this.role,
   });
 
   // Convert UserModel to Firestore-compatible map
@@ -22,7 +22,7 @@ class UserModel {
       'username': username,
       'email': email,
       'createdAt': createdAt,
-      'isInvited': isInvited,
+      'role': role,
     };
   }
 
@@ -33,7 +33,7 @@ class UserModel {
       username: map['username'] ?? '',
       email: map['email'] ?? '',
       createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      isInvited: map['isInvited'] ?? false,
+      role: map['role'] ?? '-',
     );
   }
 }

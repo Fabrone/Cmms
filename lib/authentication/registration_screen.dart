@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:logger/logger.dart';
-import 'package:cmms/authentication/homescreen.dart';
+import 'package:cmms/authentication/login_screen.dart';
+import 'package:cmms/screens/dashboard_screen.dart';
 import 'package:cmms/models/user_model.dart';
 
 class RegistrationScreen extends StatefulWidget {
@@ -49,7 +50,7 @@ class RegistrationScreenState extends State<RegistrationScreen> {
         username: _usernameController.text.trim(),
         email: _emailController.text.trim(),
         createdAt: DateTime.now(),
-        isInvited: false,
+        role: '-',
       );
 
       // Save to Firestore
@@ -62,9 +63,11 @@ class RegistrationScreenState extends State<RegistrationScreen> {
         const SnackBar(content: Text('Registration successful! Please wait for Admin approval.')),
       );
 
-      // Navigate to uninvited HomeScreen
+      // Navigate to DashboardScreen with User role
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const HomeScreen(facilityId: 'facility1')),
+        MaterialPageRoute(
+          builder: (context) => const DashboardScreen(facilityId: 'facility1', role: 'User'),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -97,7 +100,6 @@ class RegistrationScreenState extends State<RegistrationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Get screen width for responsive design
     final screenWidth = MediaQuery.of(context).size.width;
     final fieldWidth = screenWidth > 800 ? screenWidth * 0.5 : screenWidth * 0.9;
 
@@ -109,14 +111,12 @@ class RegistrationScreenState extends State<RegistrationScreen> {
             child: Container(
               constraints: BoxConstraints(maxWidth: fieldWidth),
               padding: const EdgeInsets.symmetric(horizontal: 20.0),
-              // Center vertically using Column with MainAxisAlignment.center
               child: Form(
                 key: _formKey,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Title
                     const Text(
                       'Join CMMS',
                       style: TextStyle(
@@ -131,7 +131,6 @@ class RegistrationScreenState extends State<RegistrationScreen> {
                       style: TextStyle(fontSize: 16, color: Colors.blueGrey),
                     ),
                     const SizedBox(height: 30),
-                    // Username Field
                     TextFormField(
                       controller: _usernameController,
                       decoration: InputDecoration(
@@ -149,7 +148,6 @@ class RegistrationScreenState extends State<RegistrationScreen> {
                       },
                     ),
                     const SizedBox(height: 20),
-                    // Email Field
                     TextFormField(
                       controller: _emailController,
                       decoration: InputDecoration(
@@ -168,7 +166,6 @@ class RegistrationScreenState extends State<RegistrationScreen> {
                       },
                     ),
                     const SizedBox(height: 20),
-                    // Password Field
                     TextFormField(
                       controller: _passwordController,
                       obscureText: _obscurePassword,
@@ -194,7 +191,6 @@ class RegistrationScreenState extends State<RegistrationScreen> {
                       },
                     ),
                     const SizedBox(height: 30),
-                    // Sign Up Button
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -210,6 +206,25 @@ class RegistrationScreenState extends State<RegistrationScreen> {
                                 'Sign Up',
                                 style: TextStyle(fontSize: 18, color: Colors.white),
                               ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Center(
+                      child: GestureDetector(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const LoginScreen()),
+                          );
+                        },
+                        child: const Text(
+                          'Already have an account? Log In',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.blueGrey,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
                       ),
                     ),
                   ],
