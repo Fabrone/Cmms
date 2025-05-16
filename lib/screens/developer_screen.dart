@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cmms/screens/collection_detail_screen.dart'; 
+import 'package:cmms/screens/collection_detail_screen.dart';
 
 class DeveloperScreen extends StatefulWidget {
   const DeveloperScreen({super.key});
@@ -53,7 +53,7 @@ class DeveloperScreenState extends State<DeveloperScreen> {
                       MaterialPageRoute(
                         builder: (context) => const CollectionDetailScreen(
                           collectionName: 'Admins',
-                          fields: ['username', 'email', 'createdAt', 'isDisabled'],
+                          fields: ['username', 'email', 'organization', 'createdAt', 'isDisabled'],
                           hasActions: true,
                         ),
                       ),
