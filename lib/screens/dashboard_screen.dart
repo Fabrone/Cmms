@@ -25,6 +25,7 @@ class DashboardScreenState extends State<DashboardScreen> {
   String? _currentRole;
   bool _isDeveloper = false;
   String? _selectedFacilityId;
+  String? _organization;
 
   @override
   void initState() {
@@ -65,15 +66,25 @@ class DashboardScreenState extends State<DashboardScreen> {
         _isDeveloper = developerDoc.exists;
         if (adminDoc.exists) {
           _currentRole = 'Admin';
+          _organization = adminDoc.data() != null && adminDoc.data()!['organization'] != null
+              ? adminDoc.data()!['organization']
+              : '-';
         } else if (developerDoc.exists) {
           _currentRole = 'Developer';
-        } else if (technicianDoc.exists || (userDoc.exists && (userDoc.data()?['role'] as String?) == 'Technician')) {
+          _organization = technicianDoc.exists && technicianDoc.data() != null && technicianDoc.data()!['organization'] != null
+              ? technicianDoc.data()!['organization']
+              : '-';
+        } else if (technicianDoc.exists || (userDoc.exists && userDoc.data()?['role'] == 'Technician')) {
           _currentRole = 'Technician';
+          _organization = technicianDoc.exists && technicianDoc.data() != null && technicianDoc.data()!['organization'] != null
+              ? technicianDoc.data()!['organization']
+              : '-';
         } else {
           _currentRole = 'User';
+          _organization = '-';
         }
         logger.i(
-          'Initial role set: $_currentRole, TechnicianDoc: ${technicianDoc.exists}, UserRole: ${userDoc.exists ? (userDoc.data()?['role'] as String? ?? 'N/A') : 'N/A'}',
+          'Initial role set: $_currentRole, Organization: $_organization, TechnicianDoc: ${technicianDoc.exists}, UserRole: ${userDoc.exists ? (userDoc.data()?['role'] ?? 'N/A') : 'N/A'}',
         );
       });
     }
@@ -101,25 +112,38 @@ class DashboardScreenState extends State<DashboardScreen> {
               if (collection == 'Developers') {
                 _isDeveloper = true;
               }
+              if (collection == 'Admins' || collection == 'Technicians') {
+                _organization = snapshot.data() != null && snapshot.data()!['organization'] != null
+                    ? snapshot.data()!['organization']
+                    : '-';
+              }
             } else {
               _isDeveloper = collection == 'Developers' ? false : _isDeveloper;
               if (!['Admins', 'Developers', 'Technicians']
                   .any((coll) => coll != collection && _currentRole == (coll == 'Admins' ? 'Admin' : coll.replaceAll('s', '')))) {
                 FirebaseFirestore.instance.collection('Users').doc(uid).get().then((userDoc) {
-                  if (mounted && userDoc.exists && (userDoc.data()?['role'] as String?) == 'Technician') {
-                    setState(() {
-                      _currentRole = 'Technician';
+                  if (mounted && userDoc.exists && userDoc.data()?['role'] == 'Technician') {
+                    FirebaseFirestore.instance.collection('Technicians').doc(uid).get().then((techDoc) {
+                      if (mounted) {
+                        setState(() {
+                          _currentRole = 'Technician';
+                          _organization = techDoc.exists && techDoc.data() != null && techDoc.data()!['organization'] != null
+                              ? techDoc.data()!['organization']
+                              : '-';
+                        });
+                      }
                     });
                   } else if (mounted) {
                     setState(() {
                       _currentRole = 'User';
+                      _organization = '-';
                     });
                   }
-                  logger.i('Role after snapshot check: $_currentRole');
+                  logger.i('Role after snapshot check: $_currentRole, Organization: $_organization');
                 });
               }
             }
-            logger.i('Snapshot update for $collection, Role: $_currentRole');
+            logger.i('Snapshot update for $collection, Role: $_currentRole, Organization: $_organization');
           });
         }
       }, onError: (e) {
@@ -129,12 +153,16 @@ class DashboardScreenState extends State<DashboardScreen> {
 
     FirebaseFirestore.instance.collection('Users').doc(uid).snapshots().listen((snapshot) async {
       if (mounted && snapshot.exists) {
-        final role = snapshot.data()?['role'] as String? ?? '-';
+        final role = snapshot.data()?['role'] ?? '-';
         if (role == 'Technician' && _currentRole != 'Admin' && _currentRole != 'Developer') {
+          final techDoc = await FirebaseFirestore.instance.collection('Technicians').doc(uid).get();
           setState(() {
             _currentRole = 'Technician';
+            _organization = techDoc.exists && techDoc.data() != null && techDoc.data()!['organization'] != null
+                ? techDoc.data()!['organization']
+                : '-';
           });
-          logger.i('Users collection updated role to Technician');
+          logger.i('Users collection updated role to Technician, Organization: $_organization');
         }
       }
     }, onError: (e) {
@@ -191,37 +219,63 @@ class DashboardScreenState extends State<DashboardScreen> {
     super.dispose();
   }
 
-  final Map<String, List<Map<String, dynamic>>> _roleMenuItems = {
-    'Admin': [
-      {'title': 'Scheduled Maintenance', 'icon': Icons.event},
-      {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
-      {'title': 'Reports', 'icon': Icons.bar_chart},
-      {'title': 'Price List', 'icon': Icons.attach_money},
-      {'title': 'Requests', 'icon': Icons.request_page},
-      {'title': 'Work Orders', 'icon': Icons.work},
-      {'title': 'Equipment Supplied', 'icon': Icons.construction},
-      {'title': 'Inventory and Parts', 'icon': Icons.inventory},
-    ],
-    'Technician': [
-      {'title': 'Scheduled Maintenance', 'icon': Icons.event},
-      {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
-      {'title': 'Reports', 'icon': Icons.bar_chart},
-      {'title': 'Price List', 'icon': Icons.attach_money},
-      {'title': 'Requests', 'icon': Icons.request_page},
-      {'title': 'Work Orders', 'icon': Icons.work},
-      {'title': 'Equipment Supplied', 'icon': Icons.construction},
-      {'title': 'Inventory and Parts', 'icon': Icons.inventory},
-    ],
-    'User': [
-      {'title': 'Scheduled Maintenance', 'icon': Icons.event},
-      {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
-      {'title': 'Reports', 'icon': Icons.bar_chart},
-      {'title': 'Price List', 'icon': Icons.attach_money},
-      {'title': 'Requests', 'icon': Icons.request_page},
-      {'title': 'Work Orders', 'icon': Icons.work},
-      {'title': 'Equipment Supplied', 'icon': Icons.construction},
-      {'title': 'Inventory and Parts', 'icon': Icons.inventory},
-    ],
+  final Map<String, Map<String, List<Map<String, dynamic>>>> _roleMenuItems = {
+    'Admin': {
+      'Embassy': [
+        {'title': 'Building Survey', 'icon': Icons.account_balance},
+        {'title': 'Schedule Maintenance', 'icon': Icons.event},
+        {'title': 'Requests', 'icon': Icons.request_page},
+        {'title': 'Work Orders', 'icon': Icons.work},
+      ],
+      'JV Almacis': [
+        {'title': 'Building Survey', 'icon': Icons.account_balance},
+        {'title': 'Documentations', 'icon': Icons.description},
+        {'title': 'Drawings', 'icon': Icons.brush},
+        {'title': 'Scheduled Maintenance', 'icon': Icons.event},
+        {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
+        {'title': 'Reports', 'icon': Icons.bar_chart},
+        {'title': 'Price List', 'icon': Icons.attach_money},
+        {'title': 'Requests', 'icon': Icons.request_page},
+        {'title': 'Work Orders', 'icon': Icons.work},
+        {'title': 'Equipment Supplied', 'icon': Icons.construction},
+        {'title': 'Inventory and Parts', 'icon': Icons.inventory},
+        {'title': 'Vendors', 'icon': Icons.store},
+        {'title': 'Users', 'icon': Icons.group},
+        {'title': 'KPIs', 'icon': Icons.trending_up},
+      ],
+    },
+    'Technician': {
+      'Embassy': [
+        {'title': 'Scheduled Maintenance', 'icon': Icons.event},
+        {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
+        {'title': 'Reports', 'icon': Icons.bar_chart},
+        {'title': 'Price List', 'icon': Icons.attach_money},
+        {'title': 'Requests', 'icon': Icons.request_page},
+        {'title': 'Work Orders', 'icon': Icons.work},
+      ],
+      'JV Almacis': [
+        {'title': 'Scheduled Maintenance', 'icon': Icons.event},
+        {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
+        {'title': 'Reports', 'icon': Icons.bar_chart},
+        {'title': 'Price List', 'icon': Icons.attach_money},
+        {'title': 'Requests', 'icon': Icons.request_page},
+        {'title': 'Work Orders', 'icon': Icons.work},
+        {'title': 'Equipment Supplied', 'icon': Icons.construction},
+        {'title': 'Inventory and Parts', 'icon': Icons.inventory},
+      ],
+    },
+    'User': {
+      '-': [
+        {'title': 'Scheduled Maintenance', 'icon': Icons.event},
+        {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
+        {'title': 'Reports', 'icon': Icons.bar_chart},
+        {'title': 'Price List', 'icon': Icons.attach_money},
+        {'title': 'Requests', 'icon': Icons.request_page},
+        {'title': 'Work Orders', 'icon': Icons.work},
+        {'title': 'Equipment Supplied', 'icon': Icons.construction},
+        {'title': 'Inventory and Parts', 'icon': Icons.inventory},
+      ],
+    },
   };
 
   @override
@@ -246,7 +300,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
             title: Text(
-              '$displayRole Dashboard',
+              '$displayRole Dashboard${_organization != '-' ? ' ($_organization)' : ''}',
               style: GoogleFonts.poppins(
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
@@ -298,7 +352,7 @@ class DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         children: [
           _buildAppIcon(),
-          ..._buildMenuItems(),
+          Expanded(child: ListView(children: _buildMenuItems())),
         ],
       ),
     );
@@ -311,7 +365,7 @@ class DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         children: [
           _buildAppIcon(),
-          ..._buildMenuItems(),
+          Expanded(child: ListView(children: _buildMenuItems())),
         ],
       ),
     );
@@ -319,7 +373,8 @@ class DashboardScreenState extends State<DashboardScreen> {
 
   List<Widget> _buildMenuItems() {
     final role = _currentRole == 'Developer' ? 'Technician' : _currentRole ?? 'User';
-    final menuItems = _roleMenuItems[role] ?? _roleMenuItems['User']!;
+    final org = _organization ?? '-';
+    final menuItems = _roleMenuItems[role]?[org] ?? _roleMenuItems['User']!['-']!;
 
     return menuItems.map((item) {
       return ListTile(
@@ -351,8 +406,23 @@ class DashboardScreenState extends State<DashboardScreen> {
                   ),
                 );
               }
+            } else {
+              // Placeholder navigation - Update these manually
+              /*
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => PlaceholderScreen(title: item['title']),
+                ),
+              );
+              */
+              _messengerKey.currentState?.showSnackBar(
+                SnackBar(
+                  content: Text("${item['title']} feature not yet implemented", style: GoogleFonts.poppins()),
+                ),
+              );
             }
-            Navigator.pop(context);
+            Navigator.pop(context); // Close drawer
           }
         },
       );
