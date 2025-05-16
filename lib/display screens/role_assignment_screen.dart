@@ -18,6 +18,36 @@ class _RoleAssignmentScreenState extends State<RoleAssignmentScreen> {
 
   Future<void> _assignRole(String uid) async {
     try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        if (mounted) {
+          _messengerKey.currentState?.showSnackBar(
+            SnackBar(content: Text('No authenticated user', style: GoogleFonts.poppins())),
+          );
+        }
+        return;
+      }
+
+      // Fetch Admin's organization
+      final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
+      if (!adminDoc.exists) {
+        if (mounted) {
+          _messengerKey.currentState?.showSnackBar(
+            SnackBar(content: Text('Only Admins can assign Technician roles', style: GoogleFonts.poppins())),
+          );
+        }
+        return;
+      }
+      final adminOrg = adminDoc.data()?['organization'] ?? '-';
+      if (adminOrg == '-') {
+        if (mounted) {
+          _messengerKey.currentState?.showSnackBar(
+            SnackBar(content: Text('Admin organization not set', style: GoogleFonts.poppins())),
+          );
+        }
+        return;
+      }
+
       final userDoc = await FirebaseFirestore.instance.collection('Users').doc(uid).get();
       if (!userDoc.exists) {
         if (mounted) {
@@ -41,11 +71,12 @@ class _RoleAssignmentScreenState extends State<RoleAssignmentScreen> {
       final roleData = {
         'username': userData['username'] ?? '',
         'email': userData['email'] ?? '',
+        'organization': adminOrg,
         'createdAt': Timestamp.now(),
         'isDisabled': false,
       };
 
-      _logger.i('Assigning Technician role to Users/$uid');
+      _logger.i('Assigning Technician role to Users/$uid with organization: $adminOrg');
       await FirebaseFirestore.instance.collection('Technicians').doc(uid).set(roleData);
       try {
         _logger.i('Updating Users/$uid/role to Technician');
@@ -63,7 +94,7 @@ class _RoleAssignmentScreenState extends State<RoleAssignmentScreen> {
         return;
       }
 
-      await _logActivity('Assigned Technician role to $uid (User: ${userData['username']})');
+      await _logActivity('Assigned Technician role to $uid (User: ${userData['username']}, Organization: $adminOrg)');
       if (mounted) {
         _messengerKey.currentState?.showSnackBar(
           SnackBar(content: Text('Technician role assigned successfully!', style: GoogleFonts.poppins())),
