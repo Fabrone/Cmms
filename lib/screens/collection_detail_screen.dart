@@ -23,8 +23,11 @@ class CollectionDetailScreen extends StatefulWidget {
 class CollectionDetailScreenState extends State<CollectionDetailScreen> {
   final logger = Logger(printer: PrettyPrinter());
   final TextEditingController _uidController = TextEditingController();
+  final TextEditingController _usernameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  String? _selectedOrganization;
 
   Future<void> _assignRole(String uid, String collection, String role) async {
     try {
@@ -58,9 +61,19 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
         return;
       }
 
+      if (collection == 'Admins' && _selectedOrganization == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please select an organization')),
+          );
+        }
+        return;
+      }
+
       final roleData = {
         'username': userData['username'] ?? '',
         'email': userData['email'] ?? '',
+        'organization': collection == 'Admins' ? _selectedOrganization : null,
         'createdAt': Timestamp.now(),
         'isDisabled': false,
       };
@@ -87,7 +100,7 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
       }
 
       // Log the activity
-      await _logActivity('Assigned $role role to $uid (User: ${userData['username']})');
+      await _logActivity('Assigned $role role to $uid (User: ${userData['username']}, Organization: ${_selectedOrganization ?? '-'})');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$role role assigned successfully!')),
@@ -156,8 +169,8 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error removing admin: $e')),
-      );
+          SnackBar(content: Text('Error removing admin: $e')),
+        );
       }
       logger.e('Error removing admin: $e');
     }
@@ -229,6 +242,95 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
         );
       }
       logger.e('Error removing developer: $e');
+    }
+  }
+
+  Future<void> _editAdmin(String uid, Map<String, dynamic> currentData) async {
+    _usernameController.text = currentData['username'] ?? '';
+    _emailController.text = currentData['email'] ?? '';
+    _selectedOrganization = currentData['organization'];
+
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Admin', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _usernameController,
+                decoration: InputDecoration(
+                  labelText: 'Username',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _emailController,
+                decoration: InputDecoration(
+                  labelText: 'Email',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _selectedOrganization,
+                decoration: InputDecoration(
+                  labelText: 'Organization',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                items: ['Embassy', 'JV Almacis'].map((String org) {
+                  return DropdownMenuItem<String>(
+                    value: org,
+                    child: Text(org),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  _selectedOrganization = value;
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final updatedData = {
+        'username': _usernameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'organization': _selectedOrganization,
+        'createdAt': currentData['createdAt'],
+        'isDisabled': currentData['isDisabled'] ?? false,
+      };
+
+      await _firestore.collection('Admins').doc(uid).update(updatedData);
+      await _logActivity('Edited Admin $uid (User: ${updatedData['username']}, Organization: ${_selectedOrganization ?? '-'})');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Admin updated successfully!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating admin: $e')),
+        );
+      }
+      logger.e('Error updating admin: $e');
     }
   }
 
@@ -308,28 +410,58 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
   }
 
   void _showAssignRoleDialog(String collection, String role) {
+    _selectedOrganization = null; // Reset organization
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Assign $role Role', style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _uidController,
-                decoration: InputDecoration(
-                  labelText: 'Enter User UID',
-                  hintText: 'e.g., abc123xyz789',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _uidController,
+                      decoration: InputDecoration(
+                        labelText: 'Enter User UID',
+                        hintText: 'e.g., abc123xyz789',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.search, color: Colors.blueGrey),
+                    onPressed: () => _showUserListDialog(collection, role),
+                    tooltip: 'Select User',
+                  ),
+                ],
               ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.search, color: Colors.blueGrey),
-              onPressed: () => _showUserListDialog(collection, role),
-              tooltip: 'Select User',
-            ),
-          ],
+              if (collection == 'Admins') ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: _selectedOrganization,
+                  decoration: InputDecoration(
+                    labelText: 'Organization',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  items: ['Embassy', 'JV Almacis'].map((String org) {
+                    return DropdownMenuItem<String>(
+                      value: org,
+                      child: Text(org),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedOrganization = value;
+                    });
+                  },
+                  validator: (value) => value == null ? 'Please select an organization' : null,
+                ),
+              ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -434,6 +566,8 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
   @override
   void dispose() {
     _uidController.dispose();
+    _usernameController.dispose();
+    _emailController.dispose();
     super.dispose();
   }
 
@@ -499,13 +633,15 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
                       final adminUid = data['mainAdminUid'];
                       return DataCell(
                           Text(developerUid ?? adminUid ?? 'Unknown'));
+                    } else if (field == 'organization') {
+                      return DataCell(Text(data[field]?.toString() ?? '-'));
                     }
                     return DataCell(Text(data[field]?.toString() ?? '-'));
                   }),
                   if (widget.hasActions)
                     DataCell(
                       widget.collectionName == 'Developers' &&
-                              data['email'] != 'lubangafabron@gmail.com'
+                              data['email'] == 'lubangafabron@gmail.com'
                           ? const SizedBox.shrink()
                           : PopupMenuButton<String>(
                               icon: const Icon(Icons.more_vert),
@@ -517,6 +653,8 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                     _removeDeveloper(
                                         uid, data['username'], data['email']);
                                   }
+                                } else if (value == 'edit' && widget.collectionName == 'Admins') {
+                                  _editAdmin(uid, data);
                                 } else if (value == 'reset') {
                                   _resetPassword(data['email']);
                                 } else if (value == 'disable') {
@@ -525,6 +663,18 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                 }
                               },
                               itemBuilder: (context) => [
+                                if (widget.collectionName == 'Admins') ...[
+                                  const PopupMenuItem(
+                                    value: 'edit',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.edit, color: Colors.blueGrey),
+                                        SizedBox(width: 8),
+                                        Text('Edit Admin'),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                                 PopupMenuItem(
                                   value: 'remove',
                                   child: Row(
@@ -580,10 +730,10 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
           ? FloatingActionButton(
               onPressed: () => _showAssignRoleDialog(
                 widget.collectionName,
-                widget.collectionName == 'Admins' ? 'Admin' : 'Technician',
+                widget.collectionName == 'Admins' ? 'Admin' : 'Developer',
               ),
               backgroundColor: Colors.blueGrey,
-              tooltip: 'Assign ${widget.collectionName == 'Admins' ? 'Admin' : 'Technician'}',
+              tooltip: 'Assign ${widget.collectionName == 'Admins' ? 'Admin' : 'Developer'}',
               child: const Icon(Icons.add),
             )
           : null,
