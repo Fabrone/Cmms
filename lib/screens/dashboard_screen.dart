@@ -1,5 +1,6 @@
 import 'package:cmms/display%20screens/facility_screen.dart';
 import 'package:cmms/display%20screens/role_assignment_screen.dart';
+import 'package:cmms/display%20screens/schedule_maintenance_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,7 +8,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/authentication/login_screen.dart';
 import 'package:cmms/screens/developer_screen.dart';
-import 'package:cmms/screens/schedule_maintenance_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String facilityId;
@@ -214,6 +214,16 @@ class DashboardScreenState extends State<DashboardScreen> {
     logger.i('Selected facility: $facilityId');
   }
 
+  Future<bool> _validateFacilityId(String facilityId) async {
+    try {
+      final doc = await FirebaseFirestore.instance.collection('Facilities').doc(facilityId).get();
+      return doc.exists;
+    } catch (e) {
+      logger.e('Error validating facility ID $facilityId: $e');
+      return false;
+    }
+  }
+
   @override
   void dispose() {
     super.dispose();
@@ -371,6 +381,73 @@ class DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Future<void> _handleMenuItemTap(String title) async {
+    try {
+      final role = _currentRole == 'Developer' ? 'Technician' : _currentRole ?? 'User';
+      if (role == 'User') {
+        _messengerKey.currentState?.showSnackBar(
+          SnackBar(
+            content: Text("Wait for Admin's role assignment to utilize the features", style: GoogleFonts.poppins()),
+          ),
+        );
+        return;
+      }
+
+      if (_selectedFacilityId == null) {
+        _messengerKey.currentState?.showSnackBar(
+          SnackBar(
+            content: Text("Please select a facility first", style: GoogleFonts.poppins()),
+          ),
+        );
+        return;
+      }
+
+      if (title == 'Scheduled Maintenance') {
+        final isValidFacility = await _validateFacilityId(_selectedFacilityId!);
+        if (!isValidFacility) {
+          _messengerKey.currentState?.showSnackBar(
+            SnackBar(
+              content: Text("Invalid or deleted facility selected", style: GoogleFonts.poppins()),
+            ),
+          );
+          return;
+        }
+
+        // Close drawer before navigating
+        if (mounted && Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+
+        // Navigate to ScheduleMaintenanceScreen
+        if (mounted) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ScheduleMaintenanceScreen(
+                facilityId: _selectedFacilityId!,
+                selectedSubSection: 'schedule_maintenance',
+              ),
+            ),
+          );
+          logger.i('Navigated to ScheduleMaintenanceScreen for facility: $_selectedFacilityId');
+        }
+      } else {
+        _messengerKey.currentState?.showSnackBar(
+          SnackBar(
+            content: Text("$title feature not yet implemented", style: GoogleFonts.poppins()),
+          ),
+        );
+      }
+    } catch (e) {
+      logger.e('Error navigating to $title: $e');
+      _messengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Text("Error navigating to $title: $e", style: GoogleFonts.poppins()),
+        ),
+      );
+    }
+  }
+
   List<Widget> _buildMenuItems() {
     final role = _currentRole == 'Developer' ? 'Technician' : _currentRole ?? 'User';
     final org = _organization ?? '-';
@@ -380,51 +457,7 @@ class DashboardScreenState extends State<DashboardScreen> {
       return ListTile(
         leading: Icon(item['icon'], color: Colors.blueGrey),
         title: Text(item['title'], style: GoogleFonts.poppins()),
-        onTap: () {
-          if (role == 'User') {
-            _messengerKey.currentState?.showSnackBar(
-              SnackBar(
-                content: Text("Wait for Admin's role assignment to utilize the features", style: GoogleFonts.poppins()),
-              ),
-            );
-          } else {
-            if (item['title'] == 'Scheduled Maintenance') {
-              if (_selectedFacilityId == null) {
-                _messengerKey.currentState?.showSnackBar(
-                  SnackBar(
-                    content: Text("Please select a facility first", style: GoogleFonts.poppins()),
-                  ),
-                );
-              } else {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ScheduleMaintenanceScreen(
-                      facilityId: _selectedFacilityId!,
-                      selectedSubSection: 'schedule_maintenance',
-                    ),
-                  ),
-                );
-              }
-            } else {
-              // Placeholder navigation - Update these manually
-              /*
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => PlaceholderScreen(title: item['title']),
-                ),
-              );
-              */
-              _messengerKey.currentState?.showSnackBar(
-                SnackBar(
-                  content: Text("${item['title']} feature not yet implemented", style: GoogleFonts.poppins()),
-                ),
-              );
-            }
-            Navigator.pop(context); // Close drawer
-          }
-        },
+        onTap: () => _handleMenuItemTap(item['title']),
       );
     }).toList();
   }

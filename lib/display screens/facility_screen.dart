@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/models/facility.dart';
-import 'package:cmms/screens/schedule_maintenance_screen.dart';
 
 class FacilityScreen extends StatefulWidget {
   final String? selectedFacilityId;
@@ -219,15 +218,6 @@ class _FacilityScreenState extends State<FacilityScreen> {
                           return GestureDetector(
                             onTap: () {
                               widget.onFacilitySelected(facility.id);
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => ScheduleMaintenanceScreen(
-                                    facilityId: facility.id,
-                                    selectedSubSection: 'schedule_maintenance',
-                                  ),
-                                ),
-                              );
                             },
                             child: Card(
                               elevation: isSelected ? 6 : 2,
