@@ -214,16 +214,6 @@ class DashboardScreenState extends State<DashboardScreen> {
     logger.i('Selected facility: $facilityId');
   }
 
-  Future<bool> _validateFacilityId(String facilityId) async {
-    try {
-      final doc = await FirebaseFirestore.instance.collection('Facilities').doc(facilityId).get();
-      return doc.exists;
-    } catch (e) {
-      logger.e('Error validating facility ID $facilityId: $e');
-      return false;
-    }
-  }
-
   @override
   void dispose() {
     super.dispose();
@@ -393,26 +383,7 @@ class DashboardScreenState extends State<DashboardScreen> {
         return;
       }
 
-      if (_selectedFacilityId == null) {
-        _messengerKey.currentState?.showSnackBar(
-          SnackBar(
-            content: Text("Please select a facility first", style: GoogleFonts.poppins()),
-          ),
-        );
-        return;
-      }
-
       if (title == 'Scheduled Maintenance') {
-        final isValidFacility = await _validateFacilityId(_selectedFacilityId!);
-        if (!isValidFacility) {
-          _messengerKey.currentState?.showSnackBar(
-            SnackBar(
-              content: Text("Invalid or deleted facility selected", style: GoogleFonts.poppins()),
-            ),
-          );
-          return;
-        }
-
         // Close drawer before navigating
         if (mounted && Navigator.canPop(context)) {
           Navigator.pop(context);
@@ -423,13 +394,10 @@ class DashboardScreenState extends State<DashboardScreen> {
           await Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => ScheduleMaintenanceScreen(
-                facilityId: _selectedFacilityId!,
-                selectedSubSection: 'schedule_maintenance',
-              ),
+              builder: (context) => const ScheduleMaintenanceScreen(),
             ),
           );
-          logger.i('Navigated to ScheduleMaintenanceScreen for facility: $_selectedFacilityId');
+          logger.i('Navigated to ScheduleMaintenanceScreen');
         }
       } else {
         _messengerKey.currentState?.showSnackBar(
