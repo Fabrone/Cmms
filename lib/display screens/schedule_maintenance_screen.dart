@@ -349,15 +349,14 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
               key: _formKey,
               child: Column(
                 children: [
-                  // Category Field with Searchbar Autocomplete
+                  // Category Field with Autocomplete
                   TextFormField(
                     controller: _categoryController,
                     focusNode: _categoryFocus,
                     textInputAction: TextInputAction.done,
                     onFieldSubmitted: (_) => _submitCategorySearch(),
                     decoration: InputDecoration(
-                      hintText: 'Search category (e.g., Civil, Electrical)...',
-                      prefixIcon: const Icon(Icons.search, color: Colors.blueGrey),
+                      labelText: 'Category',
                       suffixIcon: _categoryController.text.isNotEmpty
                           ? IconButton(
                               icon: const Icon(Icons.clear, color: Colors.blueGrey),
@@ -378,7 +377,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       ),
                       filled: true,
                       fillColor: Colors.grey[100],
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                     ),
                     validator: (value) => value!.isEmpty ? 'Category is required' : null,
                   ),
