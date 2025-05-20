@@ -130,12 +130,54 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
 
   Future<void> _scheduleNotification(MaintenanceTask task, String taskId) async {
     final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+    // Check notification permission
+    bool? notificationsEnabled = await flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
+    if (notificationsEnabled != true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Notification permission denied', style: GoogleFonts.poppins())),
+        );
+      }
+      logger.w('Notification permission not granted');
+      return;
+    }
+
+    // Check exact alarm permission (Android 12+)
+    bool canScheduleExact = true;
+    AndroidScheduleMode scheduleMode = AndroidScheduleMode.exactAllowWhileIdle;
+    final androidPlugin = flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    if (androidPlugin != null) {
+      canScheduleExact = await androidPlugin.canScheduleExactNotifications() ?? false;
+      if (!canScheduleExact) {
+        scheduleMode = AndroidScheduleMode.inexactAllowWhileIdle;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Exact alarm permission denied, using inexact scheduling',
+                style: GoogleFonts.poppins(),
+              ),
+            ),
+          );
+        }
+        logger.w('Exact alarm permission not granted, falling back to inexact scheduling');
+      }
+    }
+
     const androidPlatformChannelSpecifics = AndroidNotificationDetails(
       'maintenance_channel',
       'Maintenance Reminders',
       channelDescription: 'Notifications for scheduled maintenance tasks',
       importance: Importance.max,
       priority: Priority.high,
+      fullScreenIntent: true,
+      enableVibration: true,
+      playSound: true,
+      sound: RawResourceAndroidNotificationSound('default'),
     );
     const platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
 
@@ -150,15 +192,25 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       return;
     }
 
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-      taskId.hashCode, // Unique ID based on Firestore document ID
-      'Maintenance Task Reminder: ${task.category}',
-      'Task: ${task.component}\nIntervention: ${task.intervention}\nDue in 1 week',
-      reminderDate,
-      platformChannelSpecifics,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-    );
-    logger.i('Scheduled notification for task $taskId at $reminderDate');
+    try {
+      await flutterLocalNotificationsPlugin.zonedSchedule(
+        taskId.hashCode, // Unique ID based on Firestore document ID
+        'Maintenance Task Reminder: ${task.category}',
+        'Task: ${task.component}\nIntervention: ${task.intervention}\nDue in 1 week',
+        reminderDate,
+        platformChannelSpecifics,
+        androidScheduleMode: scheduleMode,
+        payload: 'maintenance_task:$taskId', // For handling tap
+      );
+      logger.i('Scheduled notification for task $taskId at $reminderDate with mode $scheduleMode');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error scheduling notification: $e', style: GoogleFonts.poppins())),
+        );
+      }
+      logger.e('Error scheduling notification: $e');
+    }
   }
 
   Future<void> _saveTask() async {
@@ -369,7 +421,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                           : null,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
+                        borderSide: BorderSide(color: Colors.grey[400]!, width: 1.0),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
@@ -426,7 +478,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       labelText: 'Component',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
+                        borderSide: BorderSide(color: Colors.grey[400]!, width: 1.0),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
@@ -448,7 +500,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       labelText: 'Intervention',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
+                        borderSide: BorderSide(color: Colors.grey[400]!, width: 1.0),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
@@ -470,7 +522,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       labelText: 'Frequency (months)',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
+                        borderSide: BorderSide(color: Colors.grey[400]!, width: 1.0),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
