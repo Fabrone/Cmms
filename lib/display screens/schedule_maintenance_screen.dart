@@ -1,16 +1,21 @@
 import 'dart:io';
 import 'package:cmms/models/maintenance_task.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:url_launcher/url_launcher.dart';
 
 class ScheduleMaintenanceScreen extends StatefulWidget {
   const ScheduleMaintenanceScreen({super.key});
@@ -37,6 +42,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     'Water Sanitation',
     'Cooling',
   ];
+  double? _uploadProgress; // Tracks upload progress (0.0 to 1.0)
 
   @override
   void initState() {
@@ -56,6 +62,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
 
   Future<void> _uploadDocument() async {
     try {
+      // Pick file
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'doc', 'docx', 'txt'],
@@ -74,12 +81,92 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         return;
       }
 
+      // Show confirmation dialog
+      if (!mounted) {
+        logger.w('Widget not mounted, skipping confirmation dialog for $fileName');
+        return;
+      }
+      final bool? confirmUpload = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Confirm Upload', style: GoogleFonts.poppins()),
+          content: Text(
+            'Do you want to upload the file: $fileName?',
+            style: GoogleFonts.poppins(),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel', style: GoogleFonts.poppins()),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text('Upload', style: GoogleFonts.poppins()),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmUpload != true) {
+        logger.i('User cancelled document upload: $fileName');
+        return;
+      }
+
+      // Show progress dialog
+      if (!mounted) {
+        logger.w('Widget not mounted, skipping progress dialog for $fileName');
+        return;
+      }
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => PopScope(
+          canPop: false, // Prevent dismissing during upload
+          child: AlertDialog(
+            title: Text('Uploading $fileName', style: GoogleFonts.poppins()),
+            content: StatefulBuilder(
+              builder: (context, setDialogState) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    LinearProgressIndicator(
+                      value: _uploadProgress,
+                      backgroundColor: Colors.grey[300],
+                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.blueGrey),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _uploadProgress != null
+                          ? '${(_uploadProgress! * 100).toStringAsFixed(0)}%'
+                          : 'Starting upload...',
+                      style: GoogleFonts.poppins(),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      );
+
       // Upload to Firebase Storage
       final storageRef = FirebaseStorage.instance
           .ref()
           .child('documents/${user.uid}/${DateTime.now().millisecondsSinceEpoch}_$fileName');
-      final uploadTask = await storageRef.putFile(file);
-      final downloadUrl = await uploadTask.ref.getDownloadURL();
+      final uploadTask = storageRef.putFile(file);
+
+      // Listen to upload progress
+      uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
+        setState(() {
+          _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
+        });
+      }, onError: (e) {
+        logger.e('Upload progress error: $e');
+      });
+
+      // Wait for upload to complete
+      await uploadTask;
+      final downloadUrl = await storageRef.getDownloadURL();
 
       // Save metadata to Firestore
       await FirebaseFirestore.instance.collection('documents').add({
@@ -89,43 +176,132 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         'uploadedAt': FieldValue.serverTimestamp(),
       });
 
+      // Dismiss progress dialog
       if (mounted) {
+        Navigator.pop(context); // Close progress dialog
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Document uploaded successfully', style: GoogleFonts.poppins())),
         );
       }
       logger.i('Uploaded document: $fileName, URL: $downloadUrl');
     } catch (e) {
+      // Dismiss progress dialog on error
       if (mounted) {
+        Navigator.pop(context); // Close progress dialog
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error uploading document: $e', style: GoogleFonts.poppins())),
         );
       }
       logger.e('Error uploading document: $e');
+    } finally {
+      // Reset progress
+      setState(() {
+        _uploadProgress = null;
+      });
     }
   }
 
-  Future<void> _openDocument(String url) async {
+  Future<void> _viewDocument(String url, String fileName) async {
     try {
-      final uri = Uri.parse(url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not open document', style: GoogleFonts.poppins())),
-          );
+      if (fileName.toLowerCase().endsWith('.pdf')) {
+        // Download PDF to temporary directory
+        final tempDir = await getTemporaryDirectory();
+        final filePath = '${tempDir.path}/$fileName';
+        await Dio().download(url, filePath);
+        final file = File(filePath);
+        if (await file.exists()) {
+          // Navigate to PDF viewer
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => PDFViewerScreen(filePath: filePath, fileName: fileName),
+              ),
+            );
+          }
+        } else {
+          throw 'Failed to download PDF';
         }
-        logger.e('Could not launch URL: $url');
+      } else {
+        // Fallback for non-PDF files
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw 'Could not open document';
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error opening document: $e', style: GoogleFonts.poppins())),
+          SnackBar(content: Text('Error viewing document: $e', style: GoogleFonts.poppins())),
         );
       }
-      logger.e('Error opening document: $e');
+      logger.e('Error viewing document: $e');
     }
+  }
+
+  Future<void> _downloadDocument(String url, String fileName) async {
+    try {
+      // Request storage permission
+      bool permissionGranted = await _requestStoragePermission();
+      if (!permissionGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Storage permission denied', style: GoogleFonts.poppins())),
+          );
+        }
+        return;
+      }
+
+      // Get downloads directory
+      final downloadsDir = await getExternalStorageDirectory();
+      final filePath = '${downloadsDir!.path}/$fileName';
+      await Dio().download(url, filePath);
+
+      final file = File(filePath);
+      if (await file.exists()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Document downloaded to $filePath', style: GoogleFonts.poppins()),
+              action: SnackBarAction(
+                label: 'Open',
+                onPressed: () => OpenFile.open(filePath),
+              ),
+            ),
+          );
+        }
+        logger.i('Downloaded document: $fileName to $filePath');
+      } else {
+        throw 'Failed to download document';
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error downloading document: $e', style: GoogleFonts.poppins())),
+        );
+      }
+      logger.e('Error downloading document: $e');
+    }
+  }
+
+  Future<bool> _requestStoragePermission() async {
+    if (Platform.isAndroid) {
+      var status = await Permission.storage.status;
+      if (!status.isGranted) {
+        status = await Permission.storage.request();
+      }
+      if (!status.isGranted) {
+        // For Android 11+, try manageExternalStorage
+        status = await Permission.manageExternalStorage.status;
+        if (!status.isGranted) {
+          status = await Permission.manageExternalStorage.request();
+        }
+      }
+      return status.isGranted;
+    }
+    return true; // iOS doesn't require explicit storage permission
   }
 
   Future<void> _scheduleNotification(MaintenanceTask task, String taskId) async {
@@ -380,9 +556,25 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       final downloadUrl = doc['downloadUrl'] as String;
                       return ListTile(
                         title: Text(fileName, style: GoogleFonts.poppins()),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.open_in_new),
-                          onPressed: () => _openDocument(downloadUrl),
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (value) {
+                            if (value == 'view') {
+                              _viewDocument(downloadUrl, fileName);
+                            } else if (value == 'download') {
+                              _downloadDocument(downloadUrl, fileName);
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            PopupMenuItem(
+                              value: 'view',
+                              child: Text('View', style: GoogleFonts.poppins()),
+                            ),
+                            PopupMenuItem(
+                              value: 'download',
+                              child: Text('Download', style: GoogleFonts.poppins()),
+                            ),
+                          ],
+                          icon: const Icon(Icons.more_vert),
                         ),
                       );
                     },
@@ -562,6 +754,36 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class PDFViewerScreen extends StatelessWidget {
+  final String filePath;
+  final String fileName;
+
+  const PDFViewerScreen({super.key, required this.filePath, required this.fileName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(fileName, style: GoogleFonts.poppins(color: Colors.white)),
+        backgroundColor: Colors.blueGrey,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: PDFView(
+        filePath: filePath,
+        enableSwipe: true,
+        swipeHorizontal: false,
+        autoSpacing: true,
+        pageFling: true,
+        onError: (error) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error loading PDF: $error', style: GoogleFonts.poppins())),
+          );
+        },
       ),
     );
   }
