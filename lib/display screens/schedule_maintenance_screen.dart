@@ -8,14 +8,18 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+//import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tz;
-import 'package:timezone/timezone.dart' as tz;
+//import 'package:timezone/timezone.dart' as tz;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class ScheduleMaintenanceScreen extends StatefulWidget {
   const ScheduleMaintenanceScreen({super.key});
@@ -43,12 +47,67 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     'Cooling',
   ];
   double? _uploadProgress; // Tracks upload progress (0.0 to 1.0)
+  final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
 
   @override
   void initState() {
     super.initState();
     tz.initializeTimeZones();
     _categoryController.addListener(_updateCategorySuggestions);
+    _setupFCM();
+  }
+
+  Future<void> _setupFCM() async {
+    await _firebaseMessaging.requestPermission();
+    String? token = await _firebaseMessaging.getToken();
+    if (token != null && FirebaseAuth.instance.currentUser != null) {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(FirebaseAuth.instance.currentUser!.uid)
+          .set({'fcmToken': token}, SetOptions(merge: true));
+      logger.i('FCM token saved for user: ${FirebaseAuth.instance.currentUser!.uid}');
+    }
+  }
+
+  Future<void> _sendPushNotification(String userId, String title, String body, String taskId, String facilityId) async {
+    try {
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      final fcmToken = userDoc.data()?['fcmToken'] as String?;
+      if (fcmToken == null) {
+        logger.w('No FCM token found for user: $userId');
+        return;
+      }
+
+      final response = await http.post(
+        Uri.parse('https://fcm.googleapis.com/fcm/send'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'key=YOUR_FCM_SERVER_KEY', // Replace with your FCM server key
+        },
+        body: jsonEncode({
+          'to': fcmToken,
+          'notification': {
+            'title': title,
+            'body': body,
+            'icon': 'ic_launcher', // Reference to android/app/src/main/res/drawable/ic_launcher.png
+          },
+          'data': {
+            'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+            'screen': 'preventive_maintenance_notifications',
+            'taskId': taskId,
+            'facilityId': facilityId,
+          },
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        logger.i('Push notification sent to user: $userId for task: $taskId');
+      } else {
+        logger.e('Failed to send push notification: ${response.body}');
+      }
+    } catch (e) {
+      logger.e('Error sending push notification: $e');
+    }
   }
 
   void _updateCategorySuggestions() {
@@ -62,7 +121,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
 
   Future<void> _uploadDocument() async {
     try {
-      // Pick file
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'doc', 'docx', 'txt'],
@@ -81,7 +139,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         return;
       }
 
-      // Show confirmation dialog
       if (!mounted) {
         logger.w('Widget not mounted, skipping confirmation dialog for $fileName');
         return;
@@ -112,7 +169,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         return;
       }
 
-      // Show progress dialog
       if (!mounted) {
         logger.w('Widget not mounted, skipping progress dialog for $fileName');
         return;
@@ -121,7 +177,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         context: context,
         barrierDismissible: false,
         builder: (context) => PopScope(
-          canPop: false, // Prevent dismissing during upload
+          canPop: false,
           child: AlertDialog(
             title: Text('Uploading $fileName', style: GoogleFonts.poppins()),
             content: StatefulBuilder(
@@ -149,13 +205,11 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         ),
       );
 
-      // Upload to Firebase Storage
       final storageRef = FirebaseStorage.instance
           .ref()
           .child('documents/${user.uid}/${DateTime.now().millisecondsSinceEpoch}_$fileName');
       final uploadTask = storageRef.putFile(file);
 
-      // Listen to upload progress
       uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
         setState(() {
           _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
@@ -164,11 +218,9 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         logger.e('Upload progress error: $e');
       });
 
-      // Wait for upload to complete
       await uploadTask;
       final downloadUrl = await storageRef.getDownloadURL();
 
-      // Save metadata to Firestore
       await FirebaseFirestore.instance.collection('documents').add({
         'userId': user.uid,
         'fileName': fileName,
@@ -176,25 +228,22 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         'uploadedAt': FieldValue.serverTimestamp(),
       });
 
-      // Dismiss progress dialog
       if (mounted) {
-        Navigator.pop(context); // Close progress dialog
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Document uploaded successfully', style: GoogleFonts.poppins())),
         );
       }
       logger.i('Uploaded document: $fileName, URL: $downloadUrl');
     } catch (e) {
-      // Dismiss progress dialog on error
       if (mounted) {
-        Navigator.pop(context); // Close progress dialog
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error uploading document: $e', style: GoogleFonts.poppins())),
         );
       }
       logger.e('Error uploading document: $e');
     } finally {
-      // Reset progress
       setState(() {
         _uploadProgress = null;
       });
@@ -204,13 +253,11 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
   Future<void> _viewDocument(String url, String fileName) async {
     try {
       if (fileName.toLowerCase().endsWith('.pdf')) {
-        // Download PDF to temporary directory
         final tempDir = await getTemporaryDirectory();
         final filePath = '${tempDir.path}/$fileName';
         await Dio().download(url, filePath);
         final file = File(filePath);
         if (await file.exists()) {
-          // Navigate to PDF viewer
           if (mounted) {
             Navigator.push(
               context,
@@ -223,7 +270,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
           throw 'Failed to download PDF';
         }
       } else {
-        // Fallback for non-PDF files
         final uri = Uri.parse(url);
         if (await canLaunchUrl(uri)) {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -243,7 +289,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
 
   Future<void> _downloadDocument(String url, String fileName) async {
     try {
-      // Request storage permission
       bool permissionGranted = await _requestStoragePermission();
       if (!permissionGranted) {
         if (mounted) {
@@ -254,7 +299,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         return;
       }
 
-      // Get downloads directory
       final downloadsDir = await getExternalStorageDirectory();
       final filePath = '${downloadsDir!.path}/$fileName';
       await Dio().download(url, filePath);
@@ -293,7 +337,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         status = await Permission.storage.request();
       }
       if (!status.isGranted) {
-        // For Android 11+, try manageExternalStorage
         status = await Permission.manageExternalStorage.status;
         if (!status.isGranted) {
           status = await Permission.manageExternalStorage.request();
@@ -301,92 +344,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       }
       return status.isGranted;
     }
-    return true; // iOS doesn't require explicit storage permission
-  }
-
-  Future<void> _scheduleNotification(MaintenanceTask task, String taskId) async {
-    final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
-
-    // Check notification permission
-    bool? notificationsEnabled = await flutterLocalNotificationsPlugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
-    if (notificationsEnabled != true) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Notification permission denied', style: GoogleFonts.poppins())),
-        );
-      }
-      logger.w('Notification permission not granted');
-      return;
-    }
-
-    // Check exact alarm permission (Android 12+)
-    bool canScheduleExact = true;
-    AndroidScheduleMode scheduleMode = AndroidScheduleMode.exactAllowWhileIdle;
-    final androidPlugin = flutterLocalNotificationsPlugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-    if (androidPlugin != null) {
-      canScheduleExact = await androidPlugin.canScheduleExactNotifications() ?? false;
-      if (!canScheduleExact) {
-        scheduleMode = AndroidScheduleMode.inexactAllowWhileIdle;
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Exact alarm permission denied, using inexact scheduling',
-                style: GoogleFonts.poppins(),
-              ),
-            ),
-          );
-        }
-        logger.w('Exact alarm permission not granted, falling back to inexact scheduling');
-      }
-    }
-
-    const androidPlatformChannelSpecifics = AndroidNotificationDetails(
-      'maintenance_channel',
-      'Maintenance Reminders',
-      channelDescription: 'Notifications for scheduled maintenance tasks',
-      importance: Importance.max,
-      priority: Priority.high,
-      fullScreenIntent: true,
-      enableVibration: true,
-      playSound: true,
-      sound: RawResourceAndroidNotificationSound('default'),
-    );
-    const platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
-
-    // Calculate reminder date: createdAt + frequency months - 1 week
-    final reminderDate = tz.TZDateTime.from(
-      task.createdAt.add(Duration(days: (task.frequency * 30) - 7)),
-      tz.local,
-    );
-    final now = tz.TZDateTime.now(tz.local);
-    if (reminderDate.isBefore(now)) {
-      logger.i('Reminder date is in the past for task: ${task.toJson()}');
-      return;
-    }
-
-    try {
-      await flutterLocalNotificationsPlugin.zonedSchedule(
-        taskId.hashCode, // Unique ID based on Firestore document ID
-        'Maintenance Task Reminder: ${task.category}',
-        'Task: ${task.component}\nIntervention: ${task.intervention}\nDue in 1 week',
-        reminderDate,
-        platformChannelSpecifics,
-        androidScheduleMode: scheduleMode,
-        payload: 'maintenance_task:$taskId', // For handling tap
-      );
-      logger.i('Scheduled notification for task $taskId at $reminderDate with mode $scheduleMode');
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error scheduling notification: $e', style: GoogleFonts.poppins())),
-        );
-      }
-      logger.e('Error scheduling notification: $e');
-    }
+    return true;
   }
 
   Future<void> _saveTask() async {
@@ -403,17 +361,44 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         return;
       }
 
+      final frequencyMonths = int.parse(_frequencyController.text);
+      final createdAt = DateTime.now();
+      final nextDue = createdAt.add(Duration(days: frequencyMonths * 30));
+      final notificationTrigger = nextDue.subtract(const Duration(days: 5));
+
       final task = MaintenanceTask(
         category: _categoryController.text,
         component: _componentController.text,
         intervention: _interventionController.text,
-        frequency: int.parse(_frequencyController.text),
+        frequency: frequencyMonths,
         createdBy: user.uid,
-        createdAt: DateTime.now(),
+        createdAt: createdAt,
       );
 
-      final docRef = await FirebaseFirestore.instance.collection('maintenance_tasks').add(task.toJson());
-      await _scheduleNotification(task, docRef.id);
+      final docRef = await FirebaseFirestore.instance.collection('maintenance_tasks').add({
+        ...task.toJson(),
+        'nextDue': Timestamp.fromDate(nextDue),
+        'notificationTrigger': Timestamp.fromDate(notificationTrigger),
+        'facilityId': 'default_facility', // Replace with actual facilityId if available
+      });
+
+      await FirebaseFirestore.instance.collection('notifications').add({
+        'userId': user.uid,
+        'title': 'Maintenance Task Reminder',
+        'body': 'Task "${task.component}" is due in 5 days on ${DateFormat.yMMMd().format(nextDue)}.',
+        'taskId': docRef.id,
+        'facilityId': 'default_facility',
+        'timestamp': Timestamp.fromDate(notificationTrigger),
+        'read': false,
+      });
+
+      await _sendPushNotification(
+        user.uid,
+        'CMMS: Maintenance Task Reminder',
+        'Task "${task.component}" is due in 5 days.',
+        docRef.id,
+        'default_facility',
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -422,7 +407,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       }
       logger.i('Saved task: ${task.toJson()}, ID: ${docRef.id}');
 
-      // Clear form
       _categoryController.clear();
       _componentController.clear();
       _interventionController.clear();
@@ -488,7 +472,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Document Upload Section
             Text(
               'Upload Document',
               style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold),
@@ -509,8 +492,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // Collapsible Document List
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -582,8 +563,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                 },
               ),
             const SizedBox(height: 16),
-
-            // Task Scheduling Form
             Text(
               'Schedule Task',
               style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold),
@@ -593,7 +572,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
               key: _formKey,
               child: Column(
                 children: [
-                  // Category Field with Autocomplete
                   TextFormField(
                     controller: _categoryController,
                     focusNode: _categoryFocus,
@@ -659,10 +637,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                         },
                       ),
                     ),
-
                   const SizedBox(height: 16),
-
-                  // Component Field
                   TextFormField(
                     controller: _componentController,
                     focusNode: _componentFocus,
@@ -684,8 +659,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                     maxLines: 2,
                   ),
                   const SizedBox(height: 16),
-
-                  // Intervention Field
                   TextFormField(
                     controller: _interventionController,
                     decoration: InputDecoration(
@@ -706,8 +679,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                     maxLines: 4,
                   ),
                   const SizedBox(height: 16),
-
-                  // Frequency Field
                   TextFormField(
                     controller: _frequencyController,
                     decoration: InputDecoration(
@@ -734,8 +705,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                     },
                   ),
                   const SizedBox(height: 16),
-
-                  // Save Task Button
                   ElevatedButton(
                     onPressed: _saveTask,
                     style: ElevatedButton.styleFrom(
