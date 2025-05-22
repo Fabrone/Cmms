@@ -23,20 +23,11 @@ class DefaultFirebaseOptions {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return ios;
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return macos;
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows;
       case TargetPlatform.linux:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for linux - '
@@ -65,6 +56,34 @@ class DefaultFirebaseOptions {
     messagingSenderId: '1008434940174',
     projectId: 'cmms-e8a97',
     storageBucket: 'cmms-e8a97.firebasestorage.app',
+  );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyC96w4LTdgxhpMGV31aI1Qodpm8JjAqjP0',
+    appId: '1:1008434940174:ios:6fdbea1254a45de18c6f5f',
+    messagingSenderId: '1008434940174',
+    projectId: 'cmms-e8a97',
+    storageBucket: 'cmms-e8a97.firebasestorage.app',
+    iosBundleId: 'com.example.cmms',
+  );
+
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyC96w4LTdgxhpMGV31aI1Qodpm8JjAqjP0',
+    appId: '1:1008434940174:ios:6fdbea1254a45de18c6f5f',
+    messagingSenderId: '1008434940174',
+    projectId: 'cmms-e8a97',
+    storageBucket: 'cmms-e8a97.firebasestorage.app',
+    iosBundleId: 'com.example.cmms',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyDPc49Am9wPVKqisi-qlP_1Ub2BT9rgTLI',
+    appId: '1:1008434940174:web:a6d1af793581c4738c6f5f',
+    messagingSenderId: '1008434940174',
+    projectId: 'cmms-e8a97',
+    authDomain: 'cmms-e8a97.firebaseapp.com',
+    storageBucket: 'cmms-e8a97.firebasestorage.app',
+    measurementId: 'G-DRYPP0L4Q6',
   );
 
 }

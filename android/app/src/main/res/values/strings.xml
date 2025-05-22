@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="maintenance_reminders">maintenance_reminders</string>
+    <string name="maintenance_reminders_name">Maintenance Reminders</string>
+    <string name="maintenance_reminders_description">Notifications for scheduled and preventive maintenance tasks</string>
+</resources>

@@ -1,4 +1,5 @@
 import 'package:cmms/display%20screens/facility_screen.dart';
+import 'package:cmms/display%20screens/preventive_maintenance_screen.dart';
 import 'package:cmms/display%20screens/role_assignment_screen.dart';
 import 'package:cmms/display%20screens/schedule_maintenance_screen.dart';
 import 'package:flutter/material.dart';
@@ -399,7 +400,26 @@ class DashboardScreenState extends State<DashboardScreen> {
           );
           logger.i('Navigated to ScheduleMaintenanceScreen');
         }
-      } else {
+      } 
+      
+        if (title == 'Preventive Maintenance') {
+        // Close drawer before navigating
+        if (mounted && Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+
+        // Navigate to PreventiveMaintenanceScreen
+        if (mounted) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const PreventiveMaintenanceScreen(facilityId: '',),
+            ),
+          );
+          logger.i('Navigated to PreventiveMaintenanceScreen');
+        }
+      }
+      else {
         _messengerKey.currentState?.showSnackBar(
           SnackBar(
             content: Text("$title feature not yet implemented", style: GoogleFonts.poppins()),
