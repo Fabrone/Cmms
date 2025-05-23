@@ -73,7 +73,7 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
         );
         if (mounted) {
           _messengerKey.currentState?.showSnackBar(
-            SnackBar(content: Text(notification.body ?? 'New notification received')),
+            SnackBar(content: Text(notification.body ?? 'New notification received', style: GoogleFonts.poppins())),
           );
         }
       }
@@ -147,7 +147,10 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
         final userId = FirebaseAuth.instance.currentUser!.uid;
         final taskId = const Uuid().v4();
         final interval = int.tryParse(_intervalController.text) ?? (_triggerType == 'Time' ? 30 : 1000);
-        final nextDue = Timestamp.now();
+        final now = DateTime.now();
+        final nextDue = _triggerType == 'Time'
+            ? Timestamp.fromDate(now.add(Duration(days: interval)))
+            : Timestamp.now();
 
         await FirebaseFirestore.instance
             .collection('facilities')
@@ -211,14 +214,14 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
         });
         if (mounted) {
           _messengerKey.currentState?.showSnackBar(
-            const SnackBar(content: Text('PM Task added successfully')),
+            SnackBar(content: Text('PM Task added successfully', style: GoogleFonts.poppins())),
           );
         }
       } catch (e) {
         _logger.e('Error adding task: $e');
         if (mounted) {
           _messengerKey.currentState?.showSnackBar(
-            SnackBar(content: Text('Error adding task: $e')),
+            SnackBar(content: Text('Error adding task: $e', style: GoogleFonts.poppins())),
           );
         }
       }
@@ -283,7 +286,7 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
 
       if (mounted) {
         _messengerKey.currentState?.showSnackBar(
-          const SnackBar(content: Text('Task marked as completed')),
+          SnackBar(content: Text('Task marked as completed', style: GoogleFonts.poppins())),
         );
       }
       _logger.i('Task marked as completed');
@@ -291,7 +294,24 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
       _logger.e('Error completing task: $e');
       if (mounted) {
         _messengerKey.currentState?.showSnackBar(
-          SnackBar(content: Text('Error completing task: $e')),
+          SnackBar(content: Text('Error completing task: $e', style: GoogleFonts.poppins())),
+        );
+      }
+    }
+  }
+
+  Future<void> _markNotificationAsRead(String notificationId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('notifications')
+          .doc(notificationId)
+          .update({'read': true});
+      _logger.i('Marked notification as read: $notificationId');
+    } catch (e) {
+      _logger.e('Error marking notification as read: $e');
+      if (mounted) {
+        _messengerKey.currentState?.showSnackBar(
+          SnackBar(content: Text('Error updating notification: $e', style: GoogleFonts.poppins())),
         );
       }
     }
@@ -556,10 +576,10 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                       const SizedBox(height: 12),
                       TextFormField(
                         controller: _notesController,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Notes (optional)',
-                          border: OutlineInputBorder(),
-                          labelStyle: TextStyle(fontFamily: 'Poppins'),
+                          border: const OutlineInputBorder(),
+                          labelStyle: GoogleFonts.poppins(),
                         ),
                         style: GoogleFonts.poppins(),
                         maxLines: 2,
@@ -584,73 +604,15 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
               style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('facilities')
-                  .doc(widget.facilityId)
-                  .collection('preventive_maintenance')
-                  .orderBy('createdAt', descending: true)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  _logger.e('Error loading scheduled tasks: ${snapshot.error}');
-                  return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
-                }
-                final docs = snapshot.data?.docs ?? [];
-                if (docs.isEmpty) {
-                  return Text('No scheduled tasks found', style: GoogleFonts.poppins());
-                }
-                return ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: docs.length,
-                  itemBuilder: (context, index) {
-                    final doc = docs[index];
-                    final nextDue = (doc['nextDue'] as Timestamp?)?.toDate();
-                    final isOverdue = nextDue != null && nextDue.isBefore(DateTime.now()) && doc['status'] == 'Scheduled';
-                    return Card(
-                      elevation: 1,
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      color: isOverdue ? Colors.red[100] : null,
-                      child: ListTile(
-                        title: Text(doc['taskName'] ?? 'Unnamed Task', style: GoogleFonts.poppins()),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Description: ${doc['description'] ?? 'N/A'}', style: GoogleFonts.poppins()),
-                            Text(
-                              'Trigger: ${doc['triggerType'] == 'Time' ? 'Interval: ${doc['intervalDays'] ?? 'N/A'} days' : 'Meter: ${doc['meterReading'] ?? 'N/A'} units'}',
-                              style: GoogleFonts.poppins(),
-                            ),
-                            Text('Status: ${doc['status']}', style: GoogleFonts.poppins()),
-                            if (nextDue != null)
-                              Text(
-                                'Next Due: ${DateFormat.yMMMd().format(nextDue)}',
-                                style: GoogleFonts.poppins(
-                                  color: isOverdue ? Colors.red : Colors.black,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
-            const SizedBox(height: 16),
             DropdownButton<String>(
               value: _statusFilter,
-              items: ['All', 'Scheduled', 'Completed', 'Overdue']
-                  .map((s) => DropdownMenuItem(value: s, child: Text(s, style: GoogleFonts.poppins())))
+              items: ['All', 'Scheduled', 'Completed']
+                  .map((status) => DropdownMenuItem(value: status, child: Text(status, style: GoogleFonts.poppins())))
                   .toList(),
               onChanged: (value) => setState(() => _statusFilter = value!),
-              underline: Container(),
+              style: GoogleFonts.poppins(),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
             StreamBuilder<QuerySnapshot>(
               stream: _statusFilter == 'All'
                   ? FirebaseFirestore.instance
@@ -659,133 +621,97 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                       .collection('preventive_maintenance')
                       .orderBy('createdAt', descending: true)
                       .snapshots()
-                  : _statusFilter == 'Overdue'
-                      ? FirebaseFirestore.instance
-                          .collection('facilities')
-                          .doc(widget.facilityId)
-                          .collection('preventive_maintenance')
-                          .where('status', isEqualTo: 'Scheduled')
-                          .where('nextDue', isLessThanOrEqualTo: Timestamp.now())
-                          .orderBy('nextDue')
-                          .snapshots()
-                      : FirebaseFirestore.instance
-                          .collection('facilities')
-                          .doc(widget.facilityId)
-                          .collection('preventive_maintenance')
-                          .where('status', isEqualTo: _statusFilter)
-                          .orderBy('createdAt', descending: true)
+                  : FirebaseFirestore.instance
+                      .collection('facilities')
+                      .doc(widget.facilityId)
+                      .collection('preventive_maintenance')
+                      .where('status', isEqualTo: _statusFilter)
+                      .orderBy('createdAt', descending: true)
                       .snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  _logger.i('Loading PM tasks...');
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (snapshot.hasError) {
-                  _logger.e('Firestore error: ${snapshot.error}');
+                  _logger.e('Error loading tasks: ${snapshot.error}');
                   return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
                 }
-                final docs = snapshot.data!.docs;
-                _logger.i('Loaded ${docs.length} PM tasks');
-                if (docs.isEmpty) return Text('No tasks found', style: GoogleFonts.poppins());
+                final tasks = snapshot.data?.docs ?? [];
+                if (tasks.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Text('No tasks found', style: GoogleFonts.poppins()),
+                  );
+                }
                 return ListView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: docs.length,
+                  itemCount: tasks.length,
                   itemBuilder: (context, index) {
-                    final doc = docs[index];
-                    final nextDue = (doc['nextDue'] as Timestamp?)?.toDate();
-                    final isOverdue = nextDue != null && nextDue.isBefore(DateTime.now()) && doc['status'] == 'Scheduled';
-                    final history = (doc['history'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+                    final task = tasks[index].data() as Map<String, dynamic>;
+                    final docId = tasks[index].id;
+                    final nextDue = (task['nextDue'] as Timestamp?)?.toDate();
+                    final status = task['status'] as String? ?? 'Scheduled';
                     return Card(
-                      elevation: 1,
+                      elevation: 2,
                       margin: const EdgeInsets.symmetric(vertical: 4),
-                      color: isOverdue ? Colors.red[100] : null,
-                      child: ExpansionTile(
-                        title: Text(doc['taskName'] ?? 'Unnamed Task', style: GoogleFonts.poppins()),
-                        subtitle: Text(
-                          'Status: ${doc['status']} | ${doc['triggerType'] == 'Time' ? 'Interval: ${doc['intervalDays'] ?? 'N/A'} days' : 'Meter: ${doc['meterReading'] ?? 'N/A'} units'}',
-                          style: GoogleFonts.poppins(),
+                      child: ListTile(
+                        title: Text(task['taskName'] ?? 'Unnamed Task', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(task['description'] ?? 'No description', style: GoogleFonts.poppins()),
+                            Text(
+                              'Next Due: ${nextDue != null ? DateFormat.yMMMd().format(nextDue) : 'N/A'}',
+                              style: GoogleFonts.poppins(),
+                            ),
+                            Text('Status: $status', style: GoogleFonts.poppins()),
+                          ],
                         ),
-                        children: [
-                          ListTile(
-                            title: Text('Description: ${doc['description'] ?? 'N/A'}', style: GoogleFonts.poppins()),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Equipment Supplied ID: ${doc['equipmentSuppliedId'] ?? 'None'}', style: GoogleFonts.poppins()),
-                                Text('Notes: ${doc['notes'] ?? 'N/A'}', style: GoogleFonts.poppins()),
-                                if (nextDue != null)
-                                  Text('Next Due: ${DateFormat.yMMMd().format(nextDue)}', style: GoogleFonts.poppins()),
-                                if (isOverdue) Text('Overdue', style: GoogleFonts.poppins(color: Colors.red)),
-                                if (doc['lastPerformed'] != null)
-                                  Text(
-                                    'Last Performed: ${DateFormat.yMMMd().format((doc['lastPerformed'] as Timestamp).toDate())}',
-                                    style: GoogleFonts.poppins(),
-                                  ),
-                                Text(
-                                  'Created: ${DateFormat.yMMMd().format((doc['createdAt'] as Timestamp).toDate())}',
-                                  style: GoogleFonts.poppins(),
-                                ),
-                              ],
-                            ),
-                          ),
-                          ListTile(
-                            title: Text('History', style: GoogleFonts.poppins()),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: history.isEmpty
-                                  ? [Text('No history available', style: GoogleFonts.poppins())]
-                                  : history
-                                      .map((entry) => Text(
-                                            '${entry['action']} at ${DateFormat.yMMMd().format((entry['timestamp'] as Timestamp).toDate())}: ${entry['notes'] ?? 'No notes'}',
-                                            style: GoogleFonts.poppins(),
-                                          ))
-                                      .toList(),
-                            ),
-                          ),
-                          ListTile(
-                            trailing: ElevatedButton(
-                              onPressed: doc['status'] == 'Completed'
-                                  ? null
-                                  : () => showDialog(
-                                        context: context,
-                                        builder: (context) {
-                                          final notesController = TextEditingController();
-                                          return AlertDialog(
-                                            title: Text('Complete Task', style: GoogleFonts.poppins()),
-                                            content: TextField(
-                                              controller: notesController,
-                                              decoration: InputDecoration(
-                                                labelText: 'Completion Notes',
-                                                labelStyle: GoogleFonts.poppins(),
-                                              ),
-                                              style: GoogleFonts.poppins(),
-                                              maxLines: 2,
+                        trailing: status == 'Scheduled'
+                            ? IconButton(
+                                icon: const Icon(Icons.check_circle, color: Colors.green),
+                                onPressed: () async {
+                                  final notesController = TextEditingController();
+                                  final bool? confirmed = await showDialog<bool>(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: Text('Complete Task', style: GoogleFonts.poppins()),
+                                      content: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text('Enter notes for task completion:', style: GoogleFonts.poppins()),
+                                          TextField(
+                                            controller: notesController,
+                                            decoration: InputDecoration(
+                                              labelText: 'Notes',
+                                              border: const OutlineInputBorder(),
+                                              labelStyle: GoogleFonts.poppins(),
                                             ),
-                                            actions: [
-                                              TextButton(
-                                                onPressed: () => Navigator.pop(context),
-                                                child: Text('Cancel', style: GoogleFonts.poppins()),
-                                              ),
-                                              TextButton(
-                                                onPressed: () {
-                                                  _completeTask(doc['taskId'], notesController.text.trim());
-                                                  Navigator.pop(context);
-                                                },
-                                                child: Text('Complete', style: GoogleFonts.poppins()),
-                                              ),
-                                            ],
-                                          );
-                                        },
+                                            style: GoogleFonts.poppins(),
+                                            maxLines: 3,
+                                          ),
+                                        ],
                                       ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blueGrey[800],
-                                foregroundColor: Colors.white,
-                              ),
-                              child: Text('Mark Complete', style: GoogleFonts.poppins()),
-                            ),
-                          ),
-                        ],
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(context, false),
+                                          child: Text('Cancel', style: GoogleFonts.poppins()),
+                                        ),
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(context, true),
+                                          child: Text('Complete', style: GoogleFonts.poppins()),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirmed == true) {
+                                    await _completeTask(docId, notesController.text.trim());
+                                  }
+                                  notesController.dispose();
+                                },
+                              )
+                            : null,
                       ),
                     );
                   },
@@ -799,83 +725,79 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
   }
 
   Widget _buildNotificationsTab() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('notifications')
-          .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
-          .orderBy('timestamp', descending: true)
-          .limit(50)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          _logger.e('Notifications error: ${snapshot.error}');
-          return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
-        }
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Text('No notifications found', style: GoogleFonts.poppins());
-        }
-
-        final notifications = snapshot.data!.docs;
-        return ListView.builder(
-          itemCount: notifications.length,
-          itemBuilder: (context, index) {
-            final notification = notifications[index];
-            final timestamp = (notification['timestamp'] as Timestamp?)?.toDate();
-            final taskId = notification['taskId'] as String?;
-            return FutureBuilder<DocumentSnapshot>(
-              future: taskId != null
-                  ? FirebaseFirestore.instance
-                      .collection('facilities')
-                      .doc(widget.facilityId)
-                      .collection('preventive_maintenance')
-                      .doc(taskId)
-                      .get()
-                  : Future.value(FirebaseFirestore.instance.collection('facilities').doc(widget.facilityId).get()),
-              builder: (context, taskSnapshot) {
-                Map<String, dynamic>? taskData;
-                if (taskSnapshot.hasData && taskSnapshot.data != null && taskSnapshot.data!.exists) {
-                  taskData = taskSnapshot.data!.data() as Map<String, dynamic>?;
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Notifications',
+              style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('notifications')
+                  .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                  .where('facilityId', isEqualTo: widget.facilityId)
+                  .orderBy('timestamp', descending: true)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
                 }
-                return Card(
-                  elevation: 1,
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  child: ListTile(
-                    title: Text(notification['title'] ?? 'Notification', style: GoogleFonts.poppins()),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(notification['body'] ?? 'No details', style: GoogleFonts.poppins()),
-                        if (taskData != null && taskData.containsKey('taskName')) ...[
-                          Text('Task: ${taskData['taskName']}', style: GoogleFonts.poppins()),
-                          Text('Status: ${taskData['status']}', style: GoogleFonts.poppins()),
-                          if (taskData['nextDue'] != null)
+                if (snapshot.hasError) {
+                  _logger.e('Error loading notifications: ${snapshot.error}');
+                  return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
+                }
+                final notifications = snapshot.data?.docs ?? [];
+                if (notifications.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Text('No notifications found', style: GoogleFonts.poppins()),
+                  );
+                }
+                return ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: notifications.length,
+                  itemBuilder: (context, index) {
+                    final notification = notifications[index].data() as Map<String, dynamic>;
+                    final notificationId = notifications[index].id;
+                    final isRead = notification['read'] as bool? ?? false;
+                    final timestamp = (notification['timestamp'] as Timestamp?)?.toDate();
+                    return Card(
+                      elevation: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      color: isRead ? Colors.white : Colors.blueGrey[50],
+                      child: ListTile(
+                        title: Text(notification['title'] ?? 'No Title', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(notification['body'] ?? 'No Body', style: GoogleFonts.poppins()),
                             Text(
-                              'Next Due: ${DateFormat.yMMMd().format((taskData['nextDue'] as Timestamp).toDate())}',
-                              style: GoogleFonts.poppins(),
+                              timestamp != null ? DateFormat.yMMMd().add_jm().format(timestamp) : 'N/A',
+                              style: GoogleFonts.poppins(fontSize: 12),
                             ),
-                        ],
-                        if (timestamp != null)
-                          Text(DateFormat.yMMMd().format(timestamp), style: GoogleFonts.poppins()),
-                      ],
-                    ),
-                    tileColor: notification['read'] ? null : Colors.blue[50],
-                    onTap: () async {
-                      await FirebaseFirestore.instance
-                          .collection('notifications')
-                          .doc(notification.id)
-                          .update({'read': true});
-                      setState(() {});
-                    },
-                  ),
+                          ],
+                        ),
+                        trailing: !isRead
+                            ? IconButton(
+                                icon: const Icon(Icons.mark_email_read, color: Colors.green),
+                                onPressed: () => _markNotificationAsRead(notificationId),
+                              )
+                            : null,
+                      ),
+                    );
+                  },
                 );
               },
-            );
-          },
-        );
-      },
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
