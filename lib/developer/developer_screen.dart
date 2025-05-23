@@ -1,5 +1,5 @@
+import 'package:cmms/developer/collection_detail_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:cmms/screens/collection_detail_screen.dart';
 
 class DeveloperScreen extends StatefulWidget {
   const DeveloperScreen({super.key});
