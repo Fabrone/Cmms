@@ -1,4 +1,5 @@
 import 'package:cmms/developer/collection_detail_screen.dart';
+import 'package:cmms/developer/maintenance_tasks_screen.dart';
 import 'package:flutter/material.dart';
 
 class DeveloperScreen extends StatefulWidget {
@@ -98,6 +99,16 @@ class DeveloperScreenState extends State<DeveloperScreen> {
                           fields: ['username', 'email', 'createdAt'],
                           hasActions: true,
                         ),
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.build, color: Colors.blueGrey),
+                    title: const Text('Update M-Tasks'),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const MaintenanceTasksScreen(),
                       ),
                     ),
                   ),
