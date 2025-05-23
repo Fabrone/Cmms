@@ -2,6 +2,18 @@ import 'package:cmms/display%20screens/facility_screen.dart';
 import 'package:cmms/display%20screens/preventive_maintenance_screen.dart';
 import 'package:cmms/display%20screens/role_assignment_screen.dart';
 import 'package:cmms/display%20screens/schedule_maintenance_screen.dart';
+import 'package:cmms/screens/building_survey_screen.dart';
+import 'package:cmms/screens/documentations_screen.dart';
+import 'package:cmms/screens/drawings_screen.dart';
+import 'package:cmms/screens/equipment_supplied_screen.dart';
+import 'package:cmms/screens/inventory_screen.dart';
+import 'package:cmms/screens/kpi_screen.dart';
+import 'package:cmms/screens/price_list_screen.dart';
+import 'package:cmms/screens/reports_screen.dart';
+import 'package:cmms/screens/request_screen.dart';
+import 'package:cmms/screens/user_screen.dart';
+import 'package:cmms/screens/vendor_screen.dart';
+import 'package:cmms/screens/work_order_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -284,6 +296,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isTabletOrWeb = screenWidth > 600;
     final displayRole = _currentRole == 'Developer' ? 'Technician' : _currentRole ?? 'User';
+    final isFacilitySelected = _selectedFacilityId != null && _selectedFacilityId!.isNotEmpty;
 
     return ScaffoldMessenger(
       key: _messengerKey,
@@ -291,12 +304,14 @@ class DashboardScreenState extends State<DashboardScreen> {
         appBar: PreferredSize(
           preferredSize: const Size.fromHeight(80.0),
           child: AppBar(
-            leading: isTabletOrWeb
+            leading: isTabletOrWeb || !isFacilitySelected
                 ? null
                 : Builder(
                     builder: (context) => IconButton(
                       icon: const Icon(Icons.menu, color: Colors.white, size: 40),
-                      onPressed: () => Scaffold.of(context).openDrawer(),
+                      onPressed: () {
+                        Scaffold.of(context).openDrawer();
+                      },
                       tooltip: 'Open Menu',
                     ),
                   ),
@@ -332,10 +347,10 @@ class DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
         ),
-        drawer: isTabletOrWeb ? null : _buildDrawer(),
+        drawer: isTabletOrWeb || !isFacilitySelected ? null : _buildDrawer(),
         body: Row(
           children: [
-            if (isTabletOrWeb) _buildSidebar(),
+            if (isTabletOrWeb && isFacilitySelected) _buildSidebar(),
             Expanded(
               child: FacilityScreen(
                 selectedFacilityId: _selectedFacilityId,
@@ -366,73 +381,223 @@ class DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         children: [
           _buildAppIcon(),
-          Expanded(child: ListView(children: _buildMenuItems())),
+          Expanded(
+            child: ListView(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.add, color: Colors.blueGrey),
+                  title: Text('Add New Facility', style: GoogleFonts.poppins()),
+                  onTap: _showAddFacilityDialog,
+                ),
+                ..._buildMenuItems(),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Future<void> _handleMenuItemTap(String title) async {
+  Future<void> _showAddFacilityDialog() async {
+    final nameController = TextEditingController();
+    final locationController = TextEditingController();
+    final addressController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final dialogContext = context; // Store context for dialog navigation
+    final messengerState = _messengerKey.currentState; // Store ScaffoldMessengerState
+
+    final result = await showDialog<Map<String, String>>(
+      context: dialogContext,
+      builder: (context) => AlertDialog(
+        title: Text('Add New Facility', style: GoogleFonts.poppins()),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: nameController,
+                decoration: InputDecoration(
+                  labelText: 'Facility Name',
+                  border: const OutlineInputBorder(),
+                  labelStyle: GoogleFonts.poppins(),
+                ),
+                style: GoogleFonts.poppins(),
+                validator: (value) => value!.isEmpty ? 'Enter facility name' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: locationController,
+                decoration: InputDecoration(
+                  labelText: 'Location (optional)',
+                  border: const OutlineInputBorder(),
+                  labelStyle: GoogleFonts.poppins(),
+                ),
+                style: GoogleFonts.poppins(),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: addressController,
+                decoration: InputDecoration(
+                  labelText: 'Address (optional)',
+                  border: const OutlineInputBorder(),
+                  labelStyle: GoogleFonts.poppins(),
+                ),
+                style: GoogleFonts.poppins(),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.poppins()),
+          ),
+          TextButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(context, {
+                  'name': nameController.text.trim(),
+                  'location': locationController.text.trim(),
+                  'address': addressController.text.trim(),
+                });
+              }
+            },
+            child: Text('Add', style: GoogleFonts.poppins()),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && mounted) {
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user == null) {
+          if (messengerState != null) {
+            messengerState.showSnackBar(
+              SnackBar(content: Text('Please log in to add a facility', style: GoogleFonts.poppins())),
+            );
+          }
+          return;
+        }
+        final facilityRef = await FirebaseFirestore.instance.collection('Facilities').add({
+          'name': result['name'],
+          'location': result['location'],
+          'address': result['address']!.isNotEmpty ? result['address'] : null,
+          'createdBy': user.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        final newFacilityId = facilityRef.id;
+        logger.i('Added new facility: ${result['name']}, ID: $newFacilityId');
+        setState(() {
+          _selectedFacilityId = newFacilityId;
+        });
+        if (messengerState != null) {
+          messengerState.showSnackBar(
+            SnackBar(content: Text('Facility added successfully', style: GoogleFonts.poppins())),
+          );
+        }
+      } catch (e) {
+        logger.e('Error adding facility: $e');
+        if (messengerState != null) {
+          messengerState.showSnackBar(
+            SnackBar(content: Text('Error adding facility: $e', style: GoogleFonts.poppins())),
+          );
+        }
+      }
+    }
+  }
+
+  void _handleMenuItemTap(String title) {
+    if (!mounted) return;
+
+    if (_selectedFacilityId == null || _selectedFacilityId!.isEmpty) {
+      _messengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Please select a facility first. If no facilities are available, add a new one.',
+            style: GoogleFonts.poppins(),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final role = _currentRole == 'Developer' ? 'Technician' : _currentRole ?? 'User';
+    if (role == 'User') {
+      _messengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Text("Wait for Admin's role assignment to utilize the features", style: GoogleFonts.poppins()),
+        ),
+      );
+      return;
+    }
+
     try {
-      final role = _currentRole == 'Developer' ? 'Technician' : _currentRole ?? 'User';
-      if (role == 'User') {
-        _messengerKey.currentState?.showSnackBar(
-          SnackBar(
-            content: Text("Wait for Admin's role assignment to utilize the features", style: GoogleFonts.poppins()),
-          ),
-        );
-        return;
-      }
-
-      if (title == 'Scheduled Maintenance') {
-        // Close drawer before navigating
-        if (mounted && Navigator.canPop(context)) {
+      if (mounted) {
+        if (Navigator.canPop(context)) {
           Navigator.pop(context);
         }
 
-        // Navigate to ScheduleMaintenanceScreen
-        if (mounted) {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const ScheduleMaintenanceScreen(),
-            ),
-          );
-          logger.i('Navigated to ScheduleMaintenanceScreen');
-        }
-      } 
-      
-        if (title == 'Preventive Maintenance') {
-        // Close drawer before navigating
-        if (mounted && Navigator.canPop(context)) {
-          Navigator.pop(context);
-        }
+        // Map of menu titles to screen widgets
+        final screenMap = {
+          'Building Survey': () => BuildingSurveyScreen(facilityId: _selectedFacilityId!, selectedSubSection: ''),
+          'Documentations': () => DocumentationsScreen(facilityId: _selectedFacilityId!),
+          'Drawings': () => DrawingsScreen(facilityId: _selectedFacilityId!),
+          'Scheduled Maintenance': () => ScheduleMaintenanceScreen(facilityId: _selectedFacilityId!),
+          'Preventive Maintenance': () => PreventiveMaintenanceScreen(facilityId: _selectedFacilityId!),
+          'Reports': () => ReportsScreen(facilityId: _selectedFacilityId!),
+          'Price List': () => PriceListScreen(facilityId: _selectedFacilityId!),
+          'Requests': () => RequestScreen(facilityId: _selectedFacilityId!),
+          'Work Orders': () => WorkOrderScreen(facilityId: _selectedFacilityId!),
+          'Equipment Supplied': () => EquipmentSuppliedScreen(facilityId: _selectedFacilityId!),
+          'Inventory and Parts': () => InventoryScreen(facilityId: _selectedFacilityId!),
+          'Vendors': () => VendorScreen(facilityId: _selectedFacilityId!),
+          'Users': () => UserScreen(facilityId: _selectedFacilityId!),
+          'KPIs': () => KpiScreen(facilityId: _selectedFacilityId!),
+        };
 
-        // Navigate to PreventiveMaintenanceScreen
-        if (mounted) {
-          await Navigator.push(
+        final screenBuilder = screenMap[title];
+        if (screenBuilder != null) {
+          Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (context) => const PreventiveMaintenanceScreen(facilityId: '',),
+            MaterialPageRoute(builder: (context) => screenBuilder()),
+          ).then((_) {
+            logger.i('Successfully navigated to $title with facilityId: $_selectedFacilityId');
+            if (mounted && _messengerKey.currentState != null) {
+              _messengerKey.currentState!.showSnackBar(
+                SnackBar(
+                  content: Text('Navigation to $title successful', style: GoogleFonts.poppins()),
+                ),
+              );
+            }
+          }).catchError((e) {
+            logger.e('Error navigating to $title: $e');
+            if (mounted && _messengerKey.currentState != null) {
+              _messengerKey.currentState!.showSnackBar(
+                SnackBar(
+                  content: Text('Error navigating to $title: $e', style: GoogleFonts.poppins()),
+                ),
+              );
+            }
+          });
+        } else {
+          _messengerKey.currentState?.showSnackBar(
+            SnackBar(
+              content: Text('$title feature not found', style: GoogleFonts.poppins()),
             ),
           );
-          logger.i('Navigated to PreventiveMaintenanceScreen');
         }
-      }
-      else {
-        _messengerKey.currentState?.showSnackBar(
-          SnackBar(
-            content: Text("$title feature not yet implemented", style: GoogleFonts.poppins()),
-          ),
-        );
       }
     } catch (e) {
       logger.e('Error navigating to $title: $e');
-      _messengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Text("Error navigating to $title: $e", style: GoogleFonts.poppins()),
-        ),
-      );
+      if (mounted && _messengerKey.currentState != null) {
+        _messengerKey.currentState!.showSnackBar(
+          SnackBar(
+            content: Text('Error navigating to $title: $e', style: GoogleFonts.poppins()),
+          ),
+        );
+      }
     }
   }
 

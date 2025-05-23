@@ -13,23 +13,23 @@ import 'package:logger/logger.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-//import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tz;
-//import 'package:timezone/timezone.dart' as tz;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class ScheduleMaintenanceScreen extends StatefulWidget {
-  const ScheduleMaintenanceScreen({super.key});
+  final String facilityId;
+
+  const ScheduleMaintenanceScreen({super.key, required this.facilityId});
 
   @override
   ScheduleMaintenanceScreenState createState() => ScheduleMaintenanceScreenState();
 }
 
 class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
-  ScheduleMaintenanceScreenState(); // Unnamed constructor
+  ScheduleMaintenanceScreenState();
   final logger = Logger(printer: PrettyPrinter());
   final _formKey = GlobalKey<FormState>();
   final _categoryController = TextEditingController();
@@ -46,7 +46,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     'Water Sanitation',
     'Cooling',
   ];
-  double? _uploadProgress; // Tracks upload progress (0.0 to 1.0)
+  double? _uploadProgress;
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
 
   @override
@@ -82,14 +82,14 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         Uri.parse('https://fcm.googleapis.com/fcm/send'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'key=YOUR_FCM_SERVER_KEY', // Replace with your FCM server key
+          'Authorization': 'key=YOUR_FCM_SERVER_KEY',
         },
         body: jsonEncode({
           'to': fcmToken,
           'notification': {
             'title': title,
             'body': body,
-            'icon': 'ic_launcher', // Reference to android/app/src/main/res/drawable/ic_launcher.png
+            'icon': 'ic_launcher',
           },
           'data': {
             'click_action': 'FLUTTER_NOTIFICATION_CLICK',
@@ -123,7 +123,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['pdf', 'doc', 'docx', 'txt'],
+        allowedExtensions: ['pdf', 'doc', 'docx', 'pptx', 'txt'],
       );
       if (result == null || result.files.isEmpty) return;
 
@@ -226,6 +226,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         'fileName': fileName,
         'downloadUrl': downloadUrl,
         'uploadedAt': FieldValue.serverTimestamp(),
+        'facilityId': widget.facilityId,
       });
 
       if (mounted) {
@@ -379,7 +380,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         ...task.toJson(),
         'nextDue': Timestamp.fromDate(nextDue),
         'notificationTrigger': Timestamp.fromDate(notificationTrigger),
-        'facilityId': 'default_facility', // Replace with actual facilityId if available
+        'facilityId': widget.facilityId,
       });
 
       await FirebaseFirestore.instance.collection('notifications').add({
@@ -387,7 +388,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         'title': 'Maintenance Task Reminder',
         'body': 'Task "${task.component}" is due in 5 days on ${DateFormat.yMMMd().format(nextDue)}.',
         'taskId': docRef.id,
-        'facilityId': 'default_facility',
+        'facilityId': widget.facilityId,
         'timestamp': Timestamp.fromDate(notificationTrigger),
         'read': false,
       });
@@ -397,7 +398,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         'CMMS: Maintenance Task Reminder',
         'Task "${task.component}" is due in 5 days.',
         docRef.id,
-        'default_facility',
+        widget.facilityId,
       );
 
       if (mounted) {
@@ -451,6 +452,37 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     _categoryFocus.dispose();
     _componentFocus.dispose();
     super.dispose();
+  }
+
+  // Helper method to get file icon and color based on extension
+  IconData _getFileIcon(String fileName) {
+    final extension = fileName.toLowerCase().split('.').last;
+    switch (extension) {
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      case 'doc':
+      case 'docx':
+        return Icons.description;
+      case 'pptx':
+        return Icons.slideshow;
+      default:
+        return Icons.insert_drive_file;
+    }
+  }
+
+  Color _getFileIconColor(String fileName) {
+    final extension = fileName.toLowerCase().split('.').last;
+    switch (extension) {
+      case 'pdf':
+        return Colors.red[600]!;
+      case 'doc':
+      case 'docx':
+        return Colors.blue[600]!;
+      case 'pptx':
+        return Colors.orange[600]!;
+      default:
+        return Colors.grey[600]!;
+    }
   }
 
   @override
@@ -513,11 +545,13 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
               StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('documents')
-                    .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                    .where('facilityId', isEqualTo: widget.facilityId)
                     .orderBy('uploadedAt', descending: true)
                     .snapshots(),
                 builder: (context, snapshot) {
+                  logger.i('StreamBuilder snapshot: connectionState=${snapshot.connectionState}, hasError=${snapshot.hasError}, docCount=${snapshot.data?.docs.length ?? 0}');
                   if (snapshot.hasError) {
+                    logger.e('StreamBuilder error: ${snapshot.error}');
                     return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
                   }
                   if (snapshot.connectionState == ConnectionState.waiting) {
@@ -525,8 +559,13 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                   }
                   final docs = snapshot.data?.docs ?? [];
                   if (docs.isEmpty) {
-                    return Text('No documents uploaded', style: GoogleFonts.poppins());
+                    logger.w('No documents found for facilityId: ${widget.facilityId}');
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Text('No documents uploaded yet', style: GoogleFonts.poppins()),
+                    );
                   }
+                  logger.i('Found ${docs.length} documents: ${docs.map((doc) => doc.data()).toList()}');
                   return ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -535,27 +574,55 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       final doc = docs[index];
                       final fileName = doc['fileName'] as String;
                       final downloadUrl = doc['downloadUrl'] as String;
-                      return ListTile(
-                        title: Text(fileName, style: GoogleFonts.poppins()),
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (value) {
-                            if (value == 'view') {
-                              _viewDocument(downloadUrl, fileName);
-                            } else if (value == 'download') {
-                              _downloadDocument(downloadUrl, fileName);
-                            }
-                          },
-                          itemBuilder: (context) => [
-                            PopupMenuItem(
-                              value: 'view',
-                              child: Text('View', style: GoogleFonts.poppins()),
+                      return Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        margin: const EdgeInsets.symmetric(vertical: 6),
+                        child: ListTile(
+                          leading: Icon(
+                            _getFileIcon(fileName),
+                            color: _getFileIconColor(fileName),
+                            size: 32,
+                          ),
+                          title: Text(
+                            fileName,
+                            style: GoogleFonts.poppins(
+                              color: Colors.green[900],
+                              fontWeight: FontWeight.w500,
                             ),
-                            PopupMenuItem(
-                              value: 'download',
-                              child: Text('Download', style: GoogleFonts.poppins()),
-                            ),
-                          ],
-                          icon: const Icon(Icons.more_vert),
+                          ),
+                          trailing: PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == 'view') {
+                                _viewDocument(downloadUrl, fileName);
+                              } else if (value == 'download') {
+                                _downloadDocument(downloadUrl, fileName);
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              PopupMenuItem(
+                                value: 'view',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.visibility, color: Colors.blue[700], size: 20),
+                                    const SizedBox(width: 8),
+                                    Text('View', style: GoogleFonts.poppins()),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'download',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.download, color: Colors.green[700], size: 20),
+                                    const SizedBox(width: 8),
+                                    Text('Download', style: GoogleFonts.poppins()),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
+                          ),
                         ),
                       );
                     },

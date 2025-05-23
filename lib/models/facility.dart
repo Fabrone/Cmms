@@ -6,6 +6,7 @@ class Facility {
   final String location;
   final String? address;
   final DateTime createdAt;
+  final String createdBy;
 
   Facility({
     required this.id,
@@ -13,6 +14,7 @@ class Facility {
     required this.location,
     this.address,
     required this.createdAt,
+    required this.createdBy,
   });
 
   factory Facility.fromFirestore(DocumentSnapshot doc) {
@@ -22,7 +24,8 @@ class Facility {
       name: data['name'] ?? '',
       location: data['location'] ?? '',
       address: data['address'],
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      createdBy: data['createdBy'] ?? '',
     );
   }
 
@@ -32,6 +35,7 @@ class Facility {
       'location': location,
       'address': address,
       'createdAt': Timestamp.fromDate(createdAt),
+      'createdBy': createdBy,
     };
   }
 }

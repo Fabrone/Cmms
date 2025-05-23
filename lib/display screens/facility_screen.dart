@@ -1,131 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/models/facility.dart';
 
 class FacilityScreen extends StatefulWidget {
   final String? selectedFacilityId;
-  final Function(String) onFacilitySelected;
+  final void Function(String) onFacilitySelected;
 
   const FacilityScreen({
     super.key,
-    this.selectedFacilityId,
+    required this.selectedFacilityId,
     required this.onFacilitySelected,
   });
 
   @override
-  State<FacilityScreen> createState() => _FacilityScreenState();
+  FacilityScreenState createState() => FacilityScreenState();
 }
 
-class _FacilityScreenState extends State<FacilityScreen> {
-  final _nameController = TextEditingController();
-  final _locationController = TextEditingController();
-  final _addressController = TextEditingController();
-  final Logger _logger = Logger();
+class FacilityScreenState extends State<FacilityScreen> {
+  final Logger logger = Logger(printer: PrettyPrinter());
   final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
-
-  Future<void> _addFacility() async {
-    if (_nameController.text.isEmpty || _locationController.text.isEmpty) {
-      _logger.w('Name or location empty');
-      _messengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Text('Please enter name and location', style: GoogleFonts.poppins()),
-        ),
-      );
-      return;
-    }
-
-    try {
-      final facility = Facility(
-        id: '',
-        name: _nameController.text.trim(),
-        location: _locationController.text.trim(),
-        address: _addressController.text.trim().isNotEmpty ? _addressController.text.trim() : null,
-        createdAt: DateTime.now(),
-      );
-
-      final ref = await FirebaseFirestore.instance.collection('Facilities').add(facility.toFirestore());
-      _logger.i('Facility added: ${ref.id}');
-      _nameController.clear();
-      _locationController.clear();
-      _addressController.clear();
-
-      if (mounted) {
-        _messengerKey.currentState?.showSnackBar(
-          SnackBar(content: Text('Facility added successfully', style: GoogleFonts.poppins())),
-        );
-        Navigator.pop(context);
-      }
-    } catch (e, stackTrace) {
-      _logger.e('Error adding facility: $e', stackTrace: stackTrace);
-      if (mounted) {
-        _messengerKey.currentState?.showSnackBar(
-          SnackBar(content: Text('Error adding facility: $e', style: GoogleFonts.poppins())),
-        );
-      }
-    }
-  }
-
-  void _showAddFacilityDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Add New Facility', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _nameController,
-                decoration: InputDecoration(
-                  labelText: 'Facility Name *',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  labelStyle: GoogleFonts.poppins(),
-                ),
-                style: GoogleFonts.poppins(),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _locationController,
-                decoration: InputDecoration(
-                  labelText: 'Location *',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  labelStyle: GoogleFonts.poppins(),
-                ),
-                style: GoogleFonts.poppins(),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _addressController,
-                decoration: InputDecoration(
-                  labelText: 'Address (Optional)',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  labelStyle: GoogleFonts.poppins(),
-                ),
-                style: GoogleFonts.poppins(),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.poppins()),
-          ),
-          ElevatedButton(
-            onPressed: _addFacility,
-            style: ElevatedButton.styleFrom(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              backgroundColor: Colors.blueGrey,
-            ),
-            child: Text('Add', style: GoogleFonts.poppins(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _locationController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  bool _isAddingFacility = false;
 
   @override
   void dispose() {
@@ -133,6 +34,50 @@ class _FacilityScreenState extends State<FacilityScreen> {
     _locationController.dispose();
     _addressController.dispose();
     super.dispose();
+  }
+
+  Future<void> _addFacility() async {
+    if (_formKey.currentState!.validate()) {
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user == null) {
+          _messengerKey.currentState?.showSnackBar(
+            SnackBar(content: Text('Please log in to add a facility', style: GoogleFonts.poppins())),
+          );
+          return;
+        }
+        final facility = Facility(
+          id: '',
+          name: _nameController.text.trim(),
+          location: _locationController.text.trim(),
+          address: _addressController.text.trim().isNotEmpty ? _addressController.text.trim() : null,
+          createdAt: DateTime.now(),
+          createdBy: user.uid,
+        );
+
+        final ref = await FirebaseFirestore.instance.collection('Facilities').add(facility.toFirestore());
+        widget.onFacilitySelected(ref.id);
+        _nameController.clear();
+        _locationController.clear();
+        _addressController.clear();
+        setState(() {
+          _isAddingFacility = false;
+        });
+        logger.i('Facility added: ${ref.id}');
+        if (mounted) {
+          _messengerKey.currentState?.showSnackBar(
+            SnackBar(content: Text('Facility added successfully', style: GoogleFonts.poppins())),
+          );
+        }
+      } catch (e) {
+        logger.e('Error adding facility: $e');
+        if (mounted) {
+          _messengerKey.currentState?.showSnackBar(
+            SnackBar(content: Text('Error adding facility: $e', style: GoogleFonts.poppins())),
+          );
+        }
+      }
+    }
   }
 
   @override
@@ -173,13 +118,13 @@ class _FacilityScreenState extends State<FacilityScreen> {
                         return const Center(child: CircularProgressIndicator(color: Colors.blueGrey));
                       }
                       if (snapshot.hasError) {
-                        _logger.e('Firestore error: ${snapshot.error}');
+                        logger.e('Firestore error: ${snapshot.error}');
                         return Center(
                           child: Text('Error: ${snapshot.error}', style: GoogleFonts.poppins(color: Colors.red)),
                         );
                       }
-                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                        _logger.w('No facilities in Firestore');
+                      final docs = snapshot.data?.docs ?? [];
+                      if (docs.isEmpty && !_isAddingFacility) {
                         return Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -205,19 +150,85 @@ class _FacilityScreenState extends State<FacilityScreen> {
                           ),
                         );
                       }
-
-                      final facilities = snapshot.data!.docs.map((doc) => Facility.fromFirestore(doc)).toList();
-                      _logger.i('Fetched ${facilities.length} facilities from Firestore');
+                      if (_isAddingFacility) {
+                        return Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Form(
+                            key: _formKey,
+                            child: Column(
+                              children: [
+                                TextFormField(
+                                  controller: _nameController,
+                                  decoration: InputDecoration(
+                                    labelText: 'Facility Name *',
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                    labelStyle: GoogleFonts.poppins(),
+                                  ),
+                                  style: GoogleFonts.poppins(),
+                                  validator: (value) => value!.isEmpty ? 'Enter facility name' : null,
+                                ),
+                                const SizedBox(height: 12),
+                                TextFormField(
+                                  controller: _locationController,
+                                  decoration: InputDecoration(
+                                    labelText: 'Location (optional)',
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                    labelStyle: GoogleFonts.poppins(),
+                                  ),
+                                  style: GoogleFonts.poppins(),
+                                ),
+                                const SizedBox(height: 12),
+                                TextFormField(
+                                  controller: _addressController,
+                                  decoration: InputDecoration(
+                                    labelText: 'Address (optional)',
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                    labelStyle: GoogleFonts.poppins(),
+                                  ),
+                                  style: GoogleFonts.poppins(),
+                                ),
+                                const SizedBox(height: 16),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    TextButton(
+                                      onPressed: () {
+                                        setState(() {
+                                          _isAddingFacility = false;
+                                        });
+                                        _nameController.clear();
+                                        _locationController.clear();
+                                        _addressController.clear();
+                                      },
+                                      child: Text('Cancel', style: GoogleFonts.poppins()),
+                                    ),
+                                    ElevatedButton(
+                                      onPressed: _addFacility,
+                                      style: ElevatedButton.styleFrom(
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        backgroundColor: Colors.blueGrey,
+                                      ),
+                                      child: Text('Add', style: GoogleFonts.poppins(color: Colors.white)),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }
+                      final facilities = docs.map((doc) => Facility.fromFirestore(doc)).toList();
+                      logger.i('Fetched ${facilities.length} facilities from Firestore');
 
                       return ListView.builder(
                         itemCount: facilities.length,
                         itemBuilder: (context, index) {
                           final facility = facilities[index];
                           final isSelected = facility.id == widget.selectedFacilityId;
-
                           return GestureDetector(
                             onTap: () {
                               widget.onFacilitySelected(facility.id);
+                              logger.i('Selected facility: ${facility.name}, ID: ${facility.id}');
                             },
                             child: Card(
                               elevation: isSelected ? 6 : 2,
@@ -278,7 +289,11 @@ class _FacilityScreenState extends State<FacilityScreen> {
           ),
         ),
         floatingActionButton: FloatingActionButton.extended(
-          onPressed: _showAddFacilityDialog,
+          onPressed: () {
+            setState(() {
+              _isAddingFacility = true;
+            });
+          },
           backgroundColor: Colors.blueGrey,
           icon: const Icon(Icons.add, color: Colors.white),
           label: Text(
