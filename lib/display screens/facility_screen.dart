@@ -8,11 +8,13 @@ import 'package:cmms/models/facility.dart';
 class FacilityScreen extends StatefulWidget {
   final String? selectedFacilityId;
   final void Function(String) onFacilitySelected;
+  final bool isSelectionActive;
 
   const FacilityScreen({
     super.key,
     required this.selectedFacilityId,
     required this.onFacilitySelected,
+    required this.isSelectionActive,
   });
 
   @override
@@ -225,15 +227,19 @@ class FacilityScreenState extends State<FacilityScreen> {
                         itemBuilder: (context, index) {
                           final facility = facilities[index];
                           final isSelected = facility.id == widget.selectedFacilityId;
+                          final isInteractable = widget.isSelectionActive || isSelected;
+
                           return GestureDetector(
-                            onTap: () {
-                              widget.onFacilitySelected(facility.id);
-                              logger.i('Selected facility: ${facility.name}, ID: ${facility.id}');
-                            },
+                            onTap: isInteractable
+                                ? () {
+                                    widget.onFacilitySelected(facility.id);
+                                    logger.i('Selected facility: ${facility.name}, ID: ${facility.id}');
+                                  }
+                                : null,
                             child: Card(
                               elevation: isSelected ? 6 : 2,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              color: isSelected ? Colors.blueGrey[50] : Colors.white,
+                              color: isSelected ? Colors.blueGrey[50] : isInteractable ? Colors.white : Colors.grey[200],
                               margin: const EdgeInsets.symmetric(vertical: 8),
                               child: Padding(
                                 padding: const EdgeInsets.all(16.0),
@@ -245,7 +251,7 @@ class FacilityScreenState extends State<FacilityScreen> {
                                       style: GoogleFonts.poppins(
                                         fontSize: isMobile ? 16 : 18,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.blueGrey[800],
+                                        color: isInteractable ? Colors.blueGrey[800] : Colors.grey[600],
                                       ),
                                     ),
                                     const SizedBox(height: 4),
@@ -253,7 +259,7 @@ class FacilityScreenState extends State<FacilityScreen> {
                                       facility.location,
                                       style: GoogleFonts.poppins(
                                         fontSize: isMobile ? 14 : 16,
-                                        color: Colors.blueGrey[600],
+                                        color: isInteractable ? Colors.blueGrey[600] : Colors.grey[500],
                                       ),
                                     ),
                                     if (facility.address != null) ...[
@@ -262,7 +268,7 @@ class FacilityScreenState extends State<FacilityScreen> {
                                         facility.address!,
                                         style: GoogleFonts.poppins(
                                           fontSize: isMobile ? 12 : 14,
-                                          color: Colors.blueGrey[500],
+                                          color: isInteractable ? Colors.blueGrey[500] : Colors.grey[400],
                                         ),
                                       ),
                                     ],
@@ -271,7 +277,7 @@ class FacilityScreenState extends State<FacilityScreen> {
                                       'Added: ${facility.createdAt.toLocal().toString().split(' ')[0]}',
                                       style: GoogleFonts.poppins(
                                         fontSize: isMobile ? 12 : 14,
-                                        color: Colors.blueGrey[400],
+                                        color: isInteractable ? Colors.blueGrey[400] : Colors.grey[400],
                                       ),
                                     ),
                                   ],

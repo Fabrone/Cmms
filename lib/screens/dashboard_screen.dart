@@ -39,12 +39,14 @@ class DashboardScreenState extends State<DashboardScreen> {
   bool _isDeveloper = false;
   String? _selectedFacilityId;
   String? _organization;
+  bool _isFacilitySelectionActive = true;
 
   @override
   void initState() {
     super.initState();
     _currentRole = widget.role == 'Unknown' ? 'User' : widget.role;
     _selectedFacilityId = widget.facilityId.isNotEmpty ? widget.facilityId : null;
+    _isFacilitySelectionActive = _selectedFacilityId == null;
     _initializeRoleListeners();
   }
 
@@ -79,17 +81,15 @@ class DashboardScreenState extends State<DashboardScreen> {
         _isDeveloper = developerDoc.exists;
         if (adminDoc.exists) {
           _currentRole = 'Admin';
-          _organization = adminDoc.data() != null && adminDoc.data()!['organization'] != null
-              ? adminDoc.data()!['organization']
-              : '-';
+          _organization = adminDoc.data()?['organization'] ?? '-';
         } else if (developerDoc.exists) {
           _currentRole = 'Developer';
-          _organization = technicianDoc.exists && technicianDoc.data() != null && technicianDoc.data()!['organization'] != null
+          _organization = technicianDoc.exists && technicianDoc.data()?['organization'] != null
               ? technicianDoc.data()!['organization']
               : '-';
         } else if (technicianDoc.exists || (userDoc.exists && userDoc.data()?['role'] == 'Technician')) {
           _currentRole = 'Technician';
-          _organization = technicianDoc.exists && technicianDoc.data() != null && technicianDoc.data()!['organization'] != null
+          _organization = technicianDoc.exists && technicianDoc.data()?['organization'] != null
               ? technicianDoc.data()!['organization']
               : '-';
         } else {
@@ -126,9 +126,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                 _isDeveloper = true;
               }
               if (collection == 'Admins' || collection == 'Technicians') {
-                _organization = snapshot.data() != null && snapshot.data()!['organization'] != null
-                    ? snapshot.data()!['organization']
-                    : '-';
+                _organization = snapshot.data()?['organization'] ?? '-';
               }
             } else {
               _isDeveloper = collection == 'Developers' ? false : _isDeveloper;
@@ -140,7 +138,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                       if (mounted) {
                         setState(() {
                           _currentRole = 'Technician';
-                          _organization = techDoc.exists && techDoc.data() != null && techDoc.data()!['organization'] != null
+                          _organization = techDoc.exists && techDoc.data()?['organization'] != null
                               ? techDoc.data()!['organization']
                               : '-';
                         });
@@ -171,7 +169,7 @@ class DashboardScreenState extends State<DashboardScreen> {
           final techDoc = await FirebaseFirestore.instance.collection('Technicians').doc(uid).get();
           setState(() {
             _currentRole = 'Technician';
-            _organization = techDoc.exists && techDoc.data() != null && techDoc.data()!['organization'] != null
+            _organization = techDoc.exists && techDoc.data()?['organization'] != null
                 ? techDoc.data()!['organization']
                 : '-';
           });
@@ -223,8 +221,17 @@ class DashboardScreenState extends State<DashboardScreen> {
   void _onFacilitySelected(String facilityId) {
     setState(() {
       _selectedFacilityId = facilityId;
+      _isFacilitySelectionActive = false;
     });
     logger.i('Selected facility: $facilityId');
+  }
+
+  void _resetFacilitySelection() {
+    setState(() {
+      _selectedFacilityId = null;
+      _isFacilitySelectionActive = true;
+    });
+    logger.i('Reset facility selection');
   }
 
   @override
@@ -300,64 +307,75 @@ class DashboardScreenState extends State<DashboardScreen> {
 
     return ScaffoldMessenger(
       key: _messengerKey,
-      child: Scaffold(
-        appBar: PreferredSize(
-          preferredSize: const Size.fromHeight(80.0),
-          child: AppBar(
-            leading: isTabletOrWeb || !isFacilitySelected
-                ? null
-                : Builder(
-                    builder: (context) => IconButton(
-                      icon: const Icon(Icons.menu, color: Colors.white, size: 40),
+      child: PopScope(
+        canPop: !isFacilitySelected,
+        onPopInvokedWithResult: (didPop, result) {
+          if (!didPop && isFacilitySelected) {
+            _resetFacilitySelection();
+          }
+        },
+        child: Scaffold(
+          appBar: PreferredSize(
+            preferredSize: const Size.fromHeight(80.0),
+            child: AppBar(
+              leading: isTabletOrWeb || !isFacilitySelected
+                  ? null
+                  : Builder(
+                      builder: (context) => IconButton(
+                        icon: const Icon(Icons.menu, color: Colors.white, size: 40),
+                        onPressed: isFacilitySelected
+                            ? () {
+                                Scaffold.of(context).openDrawer();
+                              }
+                            : null,
+                        tooltip: isFacilitySelected ? 'Open Menu' : 'Select a facility first',
+                      ),
+                    ),
+              title: Text(
+                '$displayRole Dashboard${_organization != '-' ? ' ($_organization)' : ''}',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  fontSize: 24,
+                ),
+              ),
+              backgroundColor: Colors.blueGrey,
+              actions: [
+                if (_currentRole == 'Admin')
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8.0),
+                    child: IconButton(
+                      icon: const Icon(Icons.person_add, color: Colors.white, size: 40),
                       onPressed: () {
-                        Scaffold.of(context).openDrawer();
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const RoleAssignmentScreen()),
+                        );
                       },
-                      tooltip: 'Open Menu',
+                      tooltip: 'Assign Technician Role',
                     ),
                   ),
-            title: Text(
-              '$displayRole Dashboard${_organization != '-' ? ' ($_organization)' : ''}',
-              style: GoogleFonts.poppins(
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                fontSize: 24,
-              ),
-            ),
-            backgroundColor: Colors.blueGrey,
-            actions: [
-              if (_currentRole == 'Admin')
-                Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: IconButton(
-                    icon: const Icon(Icons.person_add, color: Colors.white, size: 40),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const RoleAssignmentScreen()),
-                      );
-                    },
-                    tooltip: 'Assign Technician Role',
-                  ),
+                IconButton(
+                  icon: const Icon(Icons.logout, color: Colors.white, size: 40),
+                  onPressed: _handleLogout,
+                  tooltip: 'Log Out',
                 ),
-              IconButton(
-                icon: const Icon(Icons.logout, color: Colors.white, size: 40),
-                onPressed: _handleLogout,
-                tooltip: 'Log Out',
+              ],
+            ),
+          ),
+          drawer: isFacilitySelected ? _buildDrawer() : null,
+          body: Row(
+            children: [
+              if (isTabletOrWeb && isFacilitySelected) _buildSidebar(),
+              Expanded(
+                child: FacilityScreen(
+                  selectedFacilityId: _selectedFacilityId,
+                  onFacilitySelected: _onFacilitySelected,
+                  isSelectionActive: _isFacilitySelectionActive,
+                ),
               ),
             ],
           ),
-        ),
-        drawer: isTabletOrWeb || !isFacilitySelected ? null : _buildDrawer(),
-        body: Row(
-          children: [
-            if (isTabletOrWeb && isFacilitySelected) _buildSidebar(),
-            Expanded(
-              child: FacilityScreen(
-                selectedFacilityId: _selectedFacilityId,
-                onFacilitySelected: _onFacilitySelected,
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -403,8 +421,8 @@ class DashboardScreenState extends State<DashboardScreen> {
     final locationController = TextEditingController();
     final addressController = TextEditingController();
     final formKey = GlobalKey<FormState>();
-    final dialogContext = context; // Store context for dialog navigation
-    final messengerState = _messengerKey.currentState; // Store ScaffoldMessengerState
+    final dialogContext = context;
+    final messengerState = _messengerKey.currentState;
 
     final result = await showDialog<Map<String, String>>(
       context: dialogContext,
@@ -473,11 +491,9 @@ class DashboardScreenState extends State<DashboardScreen> {
       try {
         final user = FirebaseAuth.instance.currentUser;
         if (user == null) {
-          if (messengerState != null) {
-            messengerState.showSnackBar(
-              SnackBar(content: Text('Please log in to add a facility', style: GoogleFonts.poppins())),
-            );
-          }
+          messengerState?.showSnackBar(
+            SnackBar(content: Text('Please log in to add a facility', style: GoogleFonts.poppins())),
+          );
           return;
         }
         final facilityRef = await FirebaseFirestore.instance.collection('Facilities').add({
@@ -491,19 +507,16 @@ class DashboardScreenState extends State<DashboardScreen> {
         logger.i('Added new facility: ${result['name']}, ID: $newFacilityId');
         setState(() {
           _selectedFacilityId = newFacilityId;
+          _isFacilitySelectionActive = false;
         });
-        if (messengerState != null) {
-          messengerState.showSnackBar(
-            SnackBar(content: Text('Facility added successfully', style: GoogleFonts.poppins())),
-          );
-        }
+        messengerState?.showSnackBar(
+          SnackBar(content: Text('Facility added successfully', style: GoogleFonts.poppins())),
+        );
       } catch (e) {
         logger.e('Error adding facility: $e');
-        if (messengerState != null) {
-          messengerState.showSnackBar(
-            SnackBar(content: Text('Error adding facility: $e', style: GoogleFonts.poppins())),
-          );
-        }
+        messengerState?.showSnackBar(
+          SnackBar(content: Text('Error adding facility: $e', style: GoogleFonts.poppins())),
+        );
       }
     }
   }
@@ -539,7 +552,6 @@ class DashboardScreenState extends State<DashboardScreen> {
           Navigator.pop(context);
         }
 
-        // Map of menu titles to screen widgets
         final screenMap = {
           'Building Survey': () => BuildingSurveyScreen(facilityId: _selectedFacilityId!, selectedSubSection: ''),
           'Documentations': () => DocumentationsScreen(facilityId: _selectedFacilityId!),

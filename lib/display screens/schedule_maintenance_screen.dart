@@ -29,7 +29,6 @@ class ScheduleMaintenanceScreen extends StatefulWidget {
 }
 
 class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
-  ScheduleMaintenanceScreenState();
   final logger = Logger(printer: PrettyPrinter());
   final _formKey = GlobalKey<FormState>();
   final _categoryController = TextEditingController();
@@ -55,6 +54,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     tz.initializeTimeZones();
     _categoryController.addListener(_updateCategorySuggestions);
     _setupFCM();
+    logger.i('ScheduleMaintenanceScreen initialized with facilityId: ${widget.facilityId}');
   }
 
   Future<void> _setupFCM() async {
@@ -235,7 +235,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
           SnackBar(content: Text('Document uploaded successfully', style: GoogleFonts.poppins())),
         );
       }
-      logger.i('Uploaded document: $fileName, URL: $downloadUrl');
+      logger.i('Uploaded document: $fileName, URL: $downloadUrl, facilityId: ${widget.facilityId}');
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
@@ -406,7 +406,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
           SnackBar(content: Text('Task saved successfully', style: GoogleFonts.poppins())),
         );
       }
-      logger.i('Saved task: ${task.toJson()}, ID: ${docRef.id}');
+      logger.i('Saved task: ${task.toJson()}, ID: ${docRef.id}, facilityId: ${widget.facilityId}');
 
       _categoryController.clear();
       _componentController.clear();
@@ -454,7 +454,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     super.dispose();
   }
 
-  // Helper method to get file icon and color based on extension
   IconData _getFileIcon(String fileName) {
     final extension = fileName.toLowerCase().split('.').last;
     switch (extension) {
@@ -549,7 +548,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                     .orderBy('uploadedAt', descending: true)
                     .snapshots(),
                 builder: (context, snapshot) {
-                  logger.i('StreamBuilder snapshot: connectionState=${snapshot.connectionState}, hasError=${snapshot.hasError}, docCount=${snapshot.data?.docs.length ?? 0}');
+                  logger.i('StreamBuilder snapshot: connectionState=${snapshot.connectionState}, hasError=${snapshot.hasError}, docCount=${snapshot.data?.docs.length ?? 0}, facilityId=${widget.facilityId}');
                   if (snapshot.hasError) {
                     logger.e('StreamBuilder error: ${snapshot.error}');
                     return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
