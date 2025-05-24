@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/models/maintenance_task_model.dart';
+import 'package:cmms/developer/notification_setup_screen.dart';
 
 class MaintenanceTasksScreen extends StatefulWidget {
   const MaintenanceTasksScreen({super.key});
@@ -343,6 +344,8 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
               },
             ),
             const SizedBox(height: 20),
+
+            // Action Buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
@@ -377,6 +380,53 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
                 ),
               ],
             ),
+            
+            // Setup Notification Button (only show when not editing)
+            if (_selectedDocId == null) ...[
+              const SizedBox(height: 16),
+              Center(
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    // Get the latest task ID to setup notification for
+                    final latestTaskQuery = await _firestore
+                        .collection('Maintenance_Tasks')
+                        .orderBy('createdAt', descending: true)
+                        .limit(1)
+                        .get();
+                    
+                    if (latestTaskQuery.docs.isNotEmpty && mounted) {
+                      final doc = latestTaskQuery.docs.first;
+                      final task = MaintenanceTaskModel.fromFirestore(doc);
+                      final taskId = doc.id;
+                      
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => NotificationSetupScreen(
+                            task: task,
+                            taskId: taskId,
+                          ),
+                        ),
+                      );
+                      
+                      if (mounted && result == true) {
+                        _resetForm();
+                      }
+                    } else {
+                      _showSnackBar('Please save a task first before setting up notifications');
+                    }
+                  },
+                  icon: const Icon(Icons.notifications_active),
+                  label: Text('Setup Notification', style: GoogleFonts.poppins()),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
