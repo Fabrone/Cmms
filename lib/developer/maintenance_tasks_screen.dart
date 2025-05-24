@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -30,7 +31,6 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
   
   // Selected document for editing
   String? _selectedDocId;
-  String? _selectedCategory;
   
   // Firestore reference
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -51,8 +51,14 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
     _frequencyController.clear();
     setState(() {
       _selectedDocId = null;
-      _selectedCategory = null;
     });
+  }
+  
+  // Generate a unique document ID based on category and timestamp
+  String _generateDocumentId(String category) {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final cleanCategory = category.replaceAll(' ', '_').replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '');
+    return '${cleanCategory}_$timestamp';
   }
   
   Future<void> _addTask() async {
@@ -65,34 +71,36 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
         return;
       }
       
+      // Parse frequency as integer
+      final frequency = int.tryParse(_frequencyController.text.trim());
+      if (frequency == null || frequency <= 0) {
+        _showSnackBar('Please enter a valid frequency in months');
+        return;
+      }
+      
       final category = _categoryController.text.trim();
       
       // Create a task model
       final task = MaintenanceTaskModel(
+        category: category,
         component: _componentController.text.trim(),
         intervention: _interventionController.text.trim(),
-        frequency: _frequencyController.text.trim(),
+        frequency: frequency,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
         createdBy: user.uid,
       );
       
-      // Add the category as a document if it doesn't exist
-      final categoryDoc = await _firestore.collection('Maintenance_Tasks').doc(category).get();
+      // Generate a unique document ID based on category
+      final docId = _generateDocumentId(category);
       
-      if (!categoryDoc.exists) {
-        await _firestore.collection('Maintenance_Tasks').doc(category).set({
-          'createdAt': FieldValue.serverTimestamp(),
-          'createdBy': user.uid,
-          'tasks': []
-        });
-      }
-      
-      // Add the task to the category document
-      await _firestore.collection('Maintenance_Tasks').doc(category).update({
-        'tasks': FieldValue.arrayUnion([task.toMap()])
-      });
+      // Add the task with the generated document ID
+      await _firestore.collection('Maintenance_Tasks').doc(docId).set(task.toMap());
       
       _showSnackBar('Maintenance task added successfully');
       _resetForm();
+      
+      logger.i('Added task with ID: $docId for category: $category');
       
     } catch (e) {
       logger.e('Error adding task: $e');
@@ -100,8 +108,8 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
     }
   }
   
-  Future<void> _updateTask(int taskIndex) async {
-    if (!_formKey.currentState!.validate() || _selectedCategory == null) return;
+  Future<void> _updateTask() async {
+    if (!_formKey.currentState!.validate() || _selectedDocId == null) return;
     
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -110,35 +118,33 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
         return;
       }
       
-      // Get the current tasks array
-      final docSnapshot = await _firestore.collection('Maintenance_Tasks').doc(_selectedCategory).get();
+      // Parse frequency as integer
+      final frequency = int.tryParse(_frequencyController.text.trim());
+      if (frequency == null || frequency <= 0) {
+        _showSnackBar('Please enter a valid frequency in months');
+        return;
+      }
+      
+      // Get the current document to preserve createdAt and createdBy
+      final docSnapshot = await _firestore.collection('Maintenance_Tasks').doc(_selectedDocId).get();
       if (!docSnapshot.exists) {
-        _showSnackBar('Category document not found');
+        _showSnackBar('Task document not found');
         return;
       }
       
-      final categoryModel = CategoryModel.fromFirestore(docSnapshot);
+      final currentTask = MaintenanceTaskModel.fromFirestore(docSnapshot);
       
-      if (taskIndex >= categoryModel.tasks.length) {
-        _showSnackBar('Task index out of bounds');
-        return;
-      }
-      
-      // Update the specific task
-      final updatedTask = categoryModel.tasks[taskIndex].copyWith(
+      // Create updated task
+      final updatedTask = currentTask.copyWith(
+        category: _categoryController.text.trim(),
         component: _componentController.text.trim(),
         intervention: _interventionController.text.trim(),
-        frequency: _frequencyController.text.trim(),
+        frequency: frequency,
         updatedAt: DateTime.now(),
       );
       
-      final updatedTasks = List<MaintenanceTaskModel>.from(categoryModel.tasks);
-      updatedTasks[taskIndex] = updatedTask;
-      
-      // Update the document with the modified tasks array
-      await _firestore.collection('Maintenance_Tasks').doc(_selectedCategory).update({
-        'tasks': updatedTasks.map((task) => task.toMap()).toList()
-      });
+      // Update the document
+      await _firestore.collection('Maintenance_Tasks').doc(_selectedDocId).update(updatedTask.toMap());
       
       _showSnackBar('Maintenance task updated successfully');
       setState(() {
@@ -153,77 +159,15 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
     }
   }
   
-  Future<void> _deleteTask(String category, int taskIndex) async {
-    try {
-      // Get the current tasks array
-      final docSnapshot = await _firestore.collection('Maintenance_Tasks').doc(category).get();
-      if (!docSnapshot.exists) {
-        _showSnackBar('Category document not found');
-        return;
-      }
-      
-      final tasks = List<Map<String, dynamic>>.from(docSnapshot.data()!['tasks'] ?? []);
-      
-      if (taskIndex >= tasks.length) {
-        _showSnackBar('Task index out of bounds');
-        return;
-      }
-      
-      // Remove the task at the specified index
-      tasks.removeAt(taskIndex);
-      
-      // Update the document with the modified tasks array
-      await _firestore.collection('Maintenance_Tasks').doc(category).update({
-        'tasks': tasks
-      });
-      
-      // If no tasks remain, consider deleting the category document
-      if (tasks.isEmpty) {
-        if (!mounted) return;
-        bool? confirmDelete = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text('Delete Category', style: GoogleFonts.poppins()),
-            content: Text(
-              'No tasks remain in this category. Do you want to delete the category "$category"?',
-              style: GoogleFonts.poppins(),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: Text('Keep', style: GoogleFonts.poppins()),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: Text('Delete', style: GoogleFonts.poppins()),
-              ),
-            ],
-          ),
-        );
-        
-        if (confirmDelete == true) {
-          await _firestore.collection('Maintenance_Tasks').doc(category).delete();
-          _showSnackBar('Category "$category" deleted');
-        }
-      } else {
-        _showSnackBar('Task deleted successfully');
-      }
-      
-    } catch (e) {
-      logger.e('Error deleting task: $e');
-      _showSnackBar('Error deleting task: $e');
-    }
-  }
-  
-  Future<void> _deleteCategory(String category) async {
+  Future<void> _deleteTask(String docId, String category) async {
     try {
       if (!mounted) return;
       bool? confirmDelete = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text('Delete Category', style: GoogleFonts.poppins()),
+          title: Text('Delete Task', style: GoogleFonts.poppins()),
           content: Text(
-            'Are you sure you want to delete the category "$category" and all its tasks?',
+            'Are you sure you want to delete this $category maintenance task?',
             style: GoogleFonts.poppins(),
           ),
           actions: [
@@ -240,25 +184,24 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
       );
       
       if (confirmDelete == true) {
-        await _firestore.collection('Maintenance_Tasks').doc(category).delete();
-        _showSnackBar('Category "$category" deleted');
+        await _firestore.collection('Maintenance_Tasks').doc(docId).delete();
+        _showSnackBar('Task deleted successfully');
       }
       
     } catch (e) {
-      logger.e('Error deleting category: $e');
-      _showSnackBar('Error deleting category: $e');
+      logger.e('Error deleting task: $e');
+      _showSnackBar('Error deleting task: $e');
     }
   }
   
-  void _editTask(String category, Map<String, dynamic> task, int index) {
+  void _editTask(MaintenanceTaskModel task, String docId) {
     setState(() {
       _viewMode = 'add';
-      _selectedCategory = category;
-      _selectedDocId = index.toString();
-      _categoryController.text = category;
-      _componentController.text = task['component'] ?? '';
-      _interventionController.text = task['intervention'] ?? '';
-      _frequencyController.text = task['frequency'] ?? '';
+      _selectedDocId = docId;
+      _categoryController.text = task.category;
+      _componentController.text = task.component;
+      _interventionController.text = task.intervention;
+      _frequencyController.text = task.frequency.toString();
     });
   }
   
@@ -342,41 +285,62 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
               ),
               style: GoogleFonts.poppins(),
               validator: (value) => value!.isEmpty ? 'Category is required' : null,
-              enabled: _selectedDocId == null, // Disable when editing
             ),
             const SizedBox(height: 12),
             TextFormField(
               controller: _componentController,
               decoration: InputDecoration(
                 labelText: 'Component',
+                hintText: 'Brief description of the component (max 10 words)',
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 labelStyle: GoogleFonts.poppins(),
               ),
               style: GoogleFonts.poppins(),
-              validator: (value) => value!.isEmpty ? 'Component is required' : null,
+              validator: (value) {
+                if (value!.isEmpty) return 'Component is required';
+                final wordCount = value.trim().split(RegExp(r'\s+')).length;
+                if (wordCount > 10) return 'Component should not exceed 10 words';
+                return null;
+              },
+              maxLines: 2,
             ),
             const SizedBox(height: 12),
             TextFormField(
               controller: _interventionController,
               decoration: InputDecoration(
                 labelText: 'Intervention',
+                hintText: 'Detailed description of the intervention required',
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 labelStyle: GoogleFonts.poppins(),
               ),
               style: GoogleFonts.poppins(),
               validator: (value) => value!.isEmpty ? 'Intervention is required' : null,
-              maxLines: 3,
+              maxLines: 4,
             ),
             const SizedBox(height: 12),
             TextFormField(
               controller: _frequencyController,
               decoration: InputDecoration(
-                labelText: 'Frequency',
+                labelText: 'Frequency (months)',
+                hintText: 'Enter number of months (e.g., 6, 12, 24)',
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 labelStyle: GoogleFonts.poppins(),
+                suffixText: 'months',
               ),
               style: GoogleFonts.poppins(),
-              validator: (value) => value!.isEmpty ? 'Frequency is required' : null,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              validator: (value) {
+                if (value!.isEmpty) return 'Frequency is required';
+                final frequency = int.tryParse(value);
+                if (frequency == null || frequency <= 0) {
+                  return 'Enter a valid number of months';
+                }
+                if (frequency > 120) {
+                  return 'Frequency cannot exceed 120 months';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 20),
             Row(
@@ -397,7 +361,7 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
                 ElevatedButton(
                   onPressed: () {
                     if (_selectedDocId != null) {
-                      _updateTask(int.parse(_selectedDocId!));
+                      _updateTask();
                     } else {
                       _addTask();
                     }
@@ -421,7 +385,7 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
   
   Widget _buildEditView() {
     return StreamBuilder<QuerySnapshot>(
-      stream: _firestore.collection('Maintenance_Tasks').snapshots(),
+      stream: _firestore.collection('Maintenance_Tasks').orderBy('createdAt', descending: true).snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -461,13 +425,24 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
           );
         }
         
+        // Group tasks by category for better display
+        final Map<String, List<QueryDocumentSnapshot>> groupedTasks = {};
+        for (var doc in docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final category = data['category'] ?? 'Unknown';
+          if (!groupedTasks.containsKey(category)) {
+            groupedTasks[category] = [];
+          }
+          groupedTasks[category]!.add(doc);
+        }
+        
         return SingleChildScrollView(
           scrollDirection: Axis.vertical,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Maintenance Tasks',
+                'Maintenance Tasks (${docs.length} tasks in ${groupedTasks.length} categories)',
                 style: GoogleFonts.poppins(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -482,10 +457,71 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
                     DataColumn(label: Text('Category', style: GoogleFonts.poppins(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('Component', style: GoogleFonts.poppins(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('Intervention', style: GoogleFonts.poppins(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Frequency', style: GoogleFonts.poppins(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Frequency (months)', style: GoogleFonts.poppins(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('Actions', style: GoogleFonts.poppins(fontWeight: FontWeight.bold))),
                   ],
-                  rows: _buildTableRows(docs),
+                  rows: docs.map((doc) {
+                    final task = MaintenanceTaskModel.fromFirestore(doc);
+                    final docId = doc.id;
+                    
+                    return DataRow(
+                      cells: [
+                        DataCell(
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.blueGrey[100],
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              task.category,
+                              style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Container(
+                            constraints: const BoxConstraints(maxWidth: 150),
+                            child: Text(
+                              task.component,
+                              style: GoogleFonts.poppins(),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 2,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Container(
+                            constraints: const BoxConstraints(maxWidth: 200),
+                            child: Text(
+                              task.intervention,
+                              style: GoogleFonts.poppins(),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 3,
+                            ),
+                          ),
+                        ),
+                        DataCell(Text('${task.frequency}', style: GoogleFonts.poppins())),
+                        DataCell(
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: Colors.blue),
+                                onPressed: () => _editTask(task, docId),
+                                tooltip: 'Edit Task',
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () => _deleteTask(docId, task.category),
+                                tooltip: 'Delete Task',
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(),
                 ),
               ),
             ],
@@ -493,66 +529,5 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
         );
       },
     );
-  }
-  
-  List<DataRow> _buildTableRows(List<QueryDocumentSnapshot> docs) {
-    List<DataRow> rows = [];
-    
-    for (var doc in docs) {
-      final categoryModel = CategoryModel.fromFirestore(doc);
-      
-      if (categoryModel.tasks.isEmpty) {
-        rows.add(
-          DataRow(
-            cells: [
-              DataCell(Text(categoryModel.id, style: GoogleFonts.poppins())),
-              const DataCell(Text('-')),
-              const DataCell(Text('-')),
-              const DataCell(Text('-')),
-              DataCell(
-                IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red),
-                  onPressed: () => _deleteCategory(categoryModel.id),
-                  tooltip: 'Delete Category',
-                ),
-              ),
-            ],
-          ),
-        );
-      } else {
-        for (int i = 0; i < categoryModel.tasks.length; i++) {
-          final task = categoryModel.tasks[i];
-          rows.add(
-            DataRow(
-              cells: [
-                DataCell(Text(categoryModel.id, style: GoogleFonts.poppins())),
-                DataCell(Text(task.component, style: GoogleFonts.poppins())),
-                DataCell(Text(task.intervention, style: GoogleFonts.poppins())),
-                DataCell(Text(task.frequency, style: GoogleFonts.poppins())),
-                DataCell(
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit, color: Colors.blue),
-                        onPressed: () => _editTask(categoryModel.id, task.toMap(), i),
-                        tooltip: 'Edit Task',
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => _deleteTask(categoryModel.id, i),
-                        tooltip: 'Delete Task',
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-      }
-    }
-    
-    return rows;
   }
 }

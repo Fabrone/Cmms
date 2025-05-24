@@ -1,14 +1,16 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MaintenanceTaskModel {
+  final String category;
   final String component;
   final String intervention;
-  final String frequency;
+  final int frequency; // in months
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final String? createdBy;
 
   MaintenanceTaskModel({
+    required this.category,
     required this.component,
     required this.intervention,
     required this.frequency,
@@ -17,14 +19,15 @@ class MaintenanceTaskModel {
     this.createdBy,
   });
 
-  // Convert model to a Map for Firestore
+  // Convert model to a Map for Firestore (without category since it's the doc ID)
   Map<String, dynamic> toMap() {
     return {
+      'category': category, // Keep category as a field for querying
       'component': component,
       'intervention': intervention,
       'frequency': frequency,
-      'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : FieldValue.serverTimestamp(),
-      'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : FieldValue.serverTimestamp(),
+      'createdAt': createdAt ?? DateTime.now(),
+      'updatedAt': updatedAt ?? DateTime.now(),
       'createdBy': createdBy,
     };
   }
@@ -32,29 +35,42 @@ class MaintenanceTaskModel {
   // Create model from Firestore data
   factory MaintenanceTaskModel.fromMap(Map<String, dynamic> map) {
     return MaintenanceTaskModel(
+      category: map['category'] ?? '',
       component: map['component'] ?? '',
       intervention: map['intervention'] ?? '',
-      frequency: map['frequency'] ?? '',
+      frequency: map['frequency'] ?? 0,
       createdAt: map['createdAt'] != null 
-          ? (map['createdAt'] as Timestamp).toDate() 
+          ? (map['createdAt'] is Timestamp 
+              ? (map['createdAt'] as Timestamp).toDate() 
+              : map['createdAt'] as DateTime)
           : null,
       updatedAt: map['updatedAt'] != null 
-          ? (map['updatedAt'] as Timestamp).toDate() 
+          ? (map['updatedAt'] is Timestamp 
+              ? (map['updatedAt'] as Timestamp).toDate() 
+              : map['updatedAt'] as DateTime)
           : null,
       createdBy: map['createdBy'],
     );
   }
 
+  // Create model from Firestore document
+  factory MaintenanceTaskModel.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>? ?? {};
+    return MaintenanceTaskModel.fromMap(data);
+  }
+
   // Create a copy of the model with updated fields
   MaintenanceTaskModel copyWith({
+    String? category,
     String? component,
     String? intervention,
-    String? frequency,
+    int? frequency,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? createdBy,
   }) {
     return MaintenanceTaskModel(
+      category: category ?? this.category,
       component: component ?? this.component,
       intervention: intervention ?? this.intervention,
       frequency: frequency ?? this.frequency,
