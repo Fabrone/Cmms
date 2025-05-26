@@ -181,7 +181,7 @@ class NotificationService {
         final updatedGroup = GroupedNotificationModel(
           notificationDate: existingGroup.notificationDate,
           notifications: updatedNotifications,
-          isTriggered: true, // Auto-trigger when setup
+          isTriggered: false,
         );
 
         await existingDoc.reference.update(updatedGroup.toMap());
@@ -191,15 +191,12 @@ class NotificationService {
         final newGroup = GroupedNotificationModel(
           notificationDate: dates['notificationDate']!,
           notifications: [notification],
-          isTriggered: true, // Auto-trigger when setup
+          isTriggered: false,
         );
 
         final docRef = await _firestore.collection('Notifications').add(newGroup.toMap());
         notificationId = docRef.id;
       }
-
-      // Immediately send notification to technicians and admins
-      await _sendImmediateNotification(notification, assignedTechnicians);
 
       return notificationId;
     } catch (e) {
@@ -268,7 +265,7 @@ class NotificationService {
         final updatedGroup = GroupedNotificationModel(
           notificationDate: existingGroup.notificationDate,
           notifications: updatedNotifications,
-          isTriggered: true, // Auto-trigger when setup
+          isTriggered: false,
         );
 
         await existingDoc.reference.update(updatedGroup.toMap());
@@ -278,56 +275,18 @@ class NotificationService {
         final newGroup = GroupedNotificationModel(
           notificationDate: dates['notificationDate']!,
           notifications: notifications,
-          isTriggered: true, // Auto-trigger when setup
+          isTriggered: false,
         );
 
         final docRef = await _firestore.collection('Notifications').add(newGroup.toMap());
         notificationId = docRef.id;
       }
 
-      // Immediately send notification to technicians and admins
-      await _sendGroupedNotification(notifications, assignedTechnicians);
-
       return notificationId;
     } catch (e) {
       _logger.e('Error creating grouped notification: $e');
       rethrow;
     }
-  }
-
-  // Send immediate notification when setup
-  Future<void> _sendImmediateNotification(NotificationModel notification, List<String> technicianIds) async {
-    const title = 'Maintenance Scheduled';
-    final body = 'New maintenance task scheduled for ${notification.category}: ${notification.component}';
-
-    await sendNotificationToTechnicians(
-      technicianIds: technicianIds,
-      title: title,
-      body: body,
-      data: {
-        'type': 'maintenance_scheduled',
-        'category': notification.category,
-        'notificationDate': notification.notificationDate.toIso8601String(),
-      },
-    );
-  }
-
-  // Send grouped notification
-  Future<void> _sendGroupedNotification(List<NotificationModel> notifications, List<String> technicianIds) async {
-    final categories = notifications.map((n) => n.category).toSet().toList();
-    const title = 'Maintenance Scheduled';
-    final body = 'New maintenance tasks scheduled for ${categories.length} categories: ${categories.join(', ')}';
-
-    await sendNotificationToTechnicians(
-      technicianIds: technicianIds,
-      title: title,
-      body: body,
-      data: {
-        'type': 'maintenance_scheduled',
-        'categories': categories.join(','),
-        'taskCount': notifications.length.toString(),
-      },
-    );
   }
 
   // Get all technician user IDs
@@ -431,7 +390,13 @@ class NotificationService {
         final groupedNotification = GroupedNotificationModel.fromFirestore(doc);
         
         // Create notification message
-        final categories = groupedNotification.notifications.map((n) => n.category).toSet().toList();
+        const categories = <String>[];
+        for (final notification in groupedNotification.notifications) {
+          if (!categories.contains(notification.category)) {
+            categories.add(notification.category);
+          }
+        }
+        
         const title = 'Maintenance Reminder';
         final body = 'You have ${groupedNotification.notifications.length} maintenance tasks due in categories: ${categories.join(', ')}';
 
@@ -464,8 +429,6 @@ class NotificationService {
   Stream<List<GroupedNotificationModel>> getPendingNotifications() {
     return _firestore
         .collection('Notifications')
-        .where('isTriggered', isEqualTo: true)
-        .where('isCompleted', isEqualTo: false)
         .orderBy('notificationDate', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs

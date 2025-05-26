@@ -36,9 +36,14 @@ exports.checkNotifications = functions.pubsub
         const data = doc.data()
         const notifications = data.notifications || []
 
+        // Update each individual notification's isTriggered status
+        const updatedNotifications = notifications.map((notification) => ({
+          ...notification,
+          isTriggered: true,
+        }))
+
         // Get technician tokens and emails
         const techniciansSnapshot = await admin.firestore().collection("Technicians").get()
-
         const technicianIds = techniciansSnapshot.docs.map((doc) => doc.id)
 
         for (const technicianId of technicianIds) {
@@ -92,8 +97,11 @@ exports.checkNotifications = functions.pubsub
           }
         }
 
-        // Mark notification as triggered
-        batch.update(doc.ref, { isTriggered: true })
+        // Mark notification as triggered with updated individual notifications
+        batch.update(doc.ref, {
+          isTriggered: true,
+          notifications: updatedNotifications,
+        })
       }
 
       await batch.commit()
