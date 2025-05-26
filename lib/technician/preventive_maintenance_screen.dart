@@ -5,7 +5,8 @@ import 'package:logger/logger.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cmms/models/notification_model.dart';
 import 'package:cmms/models/task_status_model.dart';
-import 'package:cmms/services/task_progress_service.dart';
+import 'package:cmms/models/task_display_model.dart';
+import 'package:cmms/services/task_display_service.dart';
 
 class PreventiveMaintenanceScreen extends StatefulWidget {
   final String facilityId;
@@ -23,21 +24,21 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
   String _selectedTab = 'Tasks';
   String? _selectedCategory;
   
-  final TaskProgressService _taskProgressService = TaskProgressService();
+  final TaskDisplayService _taskDisplayService = TaskDisplayService();
 
   @override
   void initState() {
     super.initState();
     _logger.i('PreventiveMaintenanceScreen initialized: facilityId=${widget.facilityId}');
-    _initializeTaskProgress();
   }
 
-  Future<void> _initializeTaskProgress() async {
-    await _taskProgressService.initializeTasksFromMaintenanceTasks();
-  }
-
-  Future<void> _updateTaskStatus(String taskId, String category, String component, String intervention, TaskStatus newStatus) async {
+  Future<void> _updateTaskStatus(TaskDisplayModel task, TaskStatus newStatus) async {
     try {
+      if (!task.canUpdateStatus) {
+        _showSnackBar('This task has no notification setup. Status cannot be updated.');
+        return;
+      }
+
       String? notes;
       
       // Show dialog for notes if marking as in progress or completed
@@ -46,11 +47,10 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
         if (notes == null) return; // User cancelled
       }
 
-      await _taskProgressService.updateTaskStatus(
-        taskId: taskId,
-        category: category,
-        component: component,
-        intervention: intervention,
+      await _taskDisplayService.updateTaskStatus(
+        category: task.category,
+        component: task.component,
+        intervention: task.intervention,
         newStatus: newStatus,
         notes: notes,
       );
@@ -104,6 +104,108 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
             child: Text('Update', style: GoogleFonts.poppins()),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showTaskStatusMenu(TaskDisplayModel task) {
+    if (!task.canUpdateStatus) {
+      _showSnackBar('This task has no notification setup. Status cannot be updated.');
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Update Task Status',
+              style: GoogleFonts.poppins(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              task.component,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 20),
+            
+            _buildStatusOption(task, TaskStatus.waiting),
+            _buildStatusOption(task, TaskStatus.inProgress),
+            _buildStatusOption(task, TaskStatus.completed),
+            
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancel', style: GoogleFonts.poppins()),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusOption(TaskDisplayModel task, TaskStatus status) {
+    final isSelected = task.status == status;
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: () {
+          Navigator.pop(context);
+          _updateTaskStatus(task, status);
+        },
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isSelected ? _getStatusColor(status).withValues(alpha: 0.1) : Colors.grey[50],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isSelected ? _getStatusColor(status) : Colors.grey[300]!,
+              width: isSelected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                _getStatusIcon(status),
+                color: _getStatusColor(status),
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                status.displayName,
+                style: GoogleFonts.poppins(
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  color: isSelected ? _getStatusColor(status) : Colors.black87,
+                ),
+              ),
+              if (isSelected) ...[
+                const Spacer(),
+                Icon(
+                  Icons.check_circle,
+                  color: _getStatusColor(status),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -264,8 +366,8 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
           ),
           const SizedBox(height: 16),
           
-          StreamBuilder<List<CategoryProgressModel>>(
-            stream: _taskProgressService.getCategoriesProgress(),
+          StreamBuilder<List<CategoryDisplayModel>>(
+            stream: _taskDisplayService.getCategoriesWithTasks(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
@@ -325,20 +427,20 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                     decoration: BoxDecoration(
-                                      color: _getStatusColor(category.status),
+                                      color: _getStatusColor(category.overallStatus),
                                       borderRadius: BorderRadius.circular(20),
                                     ),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Icon(
-                                          _getStatusIcon(category.status),
+                                          _getStatusIcon(category.overallStatus),
                                           color: Colors.white,
                                           size: 16,
                                         ),
                                         const SizedBox(width: 4),
                                         Text(
-                                          category.status.displayName,
+                                          category.overallStatus.displayName,
                                           style: GoogleFonts.poppins(
                                             color: Colors.white,
                                             fontWeight: FontWeight.bold,
@@ -361,15 +463,16 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                                 ),
                               ),
                               const SizedBox(height: 8),
-                              Row(
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
                                 children: [
                                   _buildTaskCountChip('Total', category.totalTasks, Colors.blueGrey),
-                                  const SizedBox(width: 8),
                                   _buildTaskCountChip('Waiting', category.waitingTasks, Colors.grey),
-                                  const SizedBox(width: 8),
                                   _buildTaskCountChip('In Progress', category.inProgressTasks, Colors.orange),
-                                  const SizedBox(width: 8),
                                   _buildTaskCountChip('Completed', category.completedTasks, Colors.green),
+                                  if (category.noStatusTasks > 0)
+                                    _buildTaskCountChip('No Status', category.noStatusTasks, Colors.red),
                                 ],
                               ),
                             ],
@@ -433,8 +536,8 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
           const SizedBox(height: 16),
           
           Expanded(
-            child: StreamBuilder<List<TaskProgressModel>>(
-              stream: _taskProgressService.getTasksByCategory(_selectedCategory!),
+            child: StreamBuilder<List<CategoryDisplayModel>>(
+              stream: _taskDisplayService.getCategoriesWithTasks(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -446,7 +549,13 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                   );
                 }
                 
-                final tasks = snapshot.data ?? [];
+                final categories = snapshot.data ?? [];
+                final selectedCategoryData = categories.firstWhere(
+                  (cat) => cat.category == _selectedCategory,
+                  orElse: () => CategoryDisplayModel.fromTasks(_selectedCategory!, []),
+                );
+                
+                final tasks = selectedCategoryData.tasks;
                 
                 if (tasks.isEmpty) {
                   return Center(
@@ -493,11 +602,13 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: _getStatusColor(task.status),
+                                    color: task.hasNotification 
+                                        ? _getStatusColor(task.status)
+                                        : Colors.grey[400],
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Text(
-                                    task.status.displayName,
+                                    task.statusDisplay,
                                     style: GoogleFonts.poppins(
                                       color: Colors.white,
                                       fontSize: 12,
@@ -512,6 +623,32 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                               task.intervention,
                               style: GoogleFonts.poppins(color: Colors.grey[700]),
                             ),
+                            if (task.lastInspectionDate != null) ...[
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Icon(Icons.history, size: 16, color: Colors.grey[600]),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Last: ${DateFormat.yMMMd().format(task.lastInspectionDate!)}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Icon(Icons.schedule, size: 16, color: Colors.grey[600]),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Next: ${DateFormat.yMMMd().format(task.nextInspectionDate!)}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                             if (task.notes != null && task.notes!.isNotEmpty) ...[
                               const SizedBox(height: 8),
                               Container(
@@ -542,63 +679,18 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                               children: [
                                 Expanded(
                                   child: ElevatedButton.icon(
-                                    onPressed: task.status == TaskStatus.waiting
-                                        ? () => _updateTaskStatus(
-                                              task.taskId,
-                                              task.category,
-                                              task.component,
-                                              task.intervention,
-                                              TaskStatus.inProgress,
-                                            )
+                                    onPressed: task.canUpdateStatus
+                                        ? () => _showTaskStatusMenu(task)
                                         : null,
-                                    icon: const Icon(Icons.play_circle, size: 16),
-                                    label: Text('Start', style: GoogleFonts.poppins(fontSize: 12)),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.orange,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                    icon: const Icon(Icons.edit, size: 16),
+                                    label: Text(
+                                      task.canUpdateStatus ? 'Update Status' : 'No Notification',
+                                      style: GoogleFonts.poppins(fontSize: 12),
                                     ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    onPressed: task.status != TaskStatus.completed
-                                        ? () => _updateTaskStatus(
-                                              task.taskId,
-                                              task.category,
-                                              task.component,
-                                              task.intervention,
-                                              TaskStatus.completed,
-                                            )
-                                        : null,
-                                    icon: const Icon(Icons.check_circle, size: 16),
-                                    label: Text('Complete', style: GoogleFonts.poppins(fontSize: 12)),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.green,
+                                      backgroundColor: task.canUpdateStatus ? Colors.blueGrey : Colors.grey[400],
                                       foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 8),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    onPressed: task.status != TaskStatus.waiting
-                                        ? () => _updateTaskStatus(
-                                              task.taskId,
-                                              task.category,
-                                              task.component,
-                                              task.intervention,
-                                              TaskStatus.waiting,
-                                            )
-                                        : null,
-                                    icon: const Icon(Icons.schedule, size: 16),
-                                    label: Text('Reset', style: GoogleFonts.poppins(fontSize: 12)),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.grey,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
                                     ),
                                   ),
                                 ),
