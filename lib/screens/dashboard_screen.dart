@@ -1,6 +1,6 @@
 import 'package:cmms/developer/developer_screen.dart';
 import 'package:cmms/display%20screens/facility_screen.dart';
-import 'package:cmms/display%20screens/preventive_maintenance_screen.dart';
+//import 'package:cmms/display%20screens/preventive_maintenance_screen.dart';
 import 'package:cmms/display%20screens/role_assignment_screen.dart';
 import 'package:cmms/display%20screens/schedule_maintenance_screen.dart';
 import 'package:cmms/screens/building_survey_screen.dart';
@@ -15,6 +15,7 @@ import 'package:cmms/screens/request_screen.dart';
 import 'package:cmms/screens/user_screen.dart';
 import 'package:cmms/screens/vendor_screen.dart';
 import 'package:cmms/screens/work_order_screen.dart';
+import 'package:cmms/technician/preventive_maintenance_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';

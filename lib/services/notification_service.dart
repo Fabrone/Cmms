@@ -171,6 +171,7 @@ class NotificationService {
           .limit(1)
           .get();
 
+      String notificationId;
       if (existingGroupQuery.docs.isNotEmpty) {
         // Add to existing group
         final existingDoc = existingGroupQuery.docs.first;
@@ -180,21 +181,27 @@ class NotificationService {
         final updatedGroup = GroupedNotificationModel(
           notificationDate: existingGroup.notificationDate,
           notifications: updatedNotifications,
-          isTriggered: existingGroup.isTriggered,
+          isTriggered: true, // Auto-trigger when setup
         );
 
         await existingDoc.reference.update(updatedGroup.toMap());
-        return existingDoc.id;
+        notificationId = existingDoc.id;
       } else {
         // Create new group
         final newGroup = GroupedNotificationModel(
           notificationDate: dates['notificationDate']!,
           notifications: [notification],
+          isTriggered: true, // Auto-trigger when setup
         );
 
         final docRef = await _firestore.collection('Notifications').add(newGroup.toMap());
-        return docRef.id;
+        notificationId = docRef.id;
       }
+
+      // Immediately send notification to technicians and admins
+      await _sendImmediateNotification(notification, assignedTechnicians);
+
+      return notificationId;
     } catch (e) {
       _logger.e('Error creating notification: $e');
       rethrow;
@@ -251,6 +258,7 @@ class NotificationService {
           .limit(1)
           .get();
 
+      String notificationId;
       if (existingGroupQuery.docs.isNotEmpty) {
         // Add to existing group
         final existingDoc = existingGroupQuery.docs.first;
@@ -260,25 +268,66 @@ class NotificationService {
         final updatedGroup = GroupedNotificationModel(
           notificationDate: existingGroup.notificationDate,
           notifications: updatedNotifications,
-          isTriggered: existingGroup.isTriggered,
+          isTriggered: true, // Auto-trigger when setup
         );
 
         await existingDoc.reference.update(updatedGroup.toMap());
-        return existingDoc.id;
+        notificationId = existingDoc.id;
       } else {
         // Create new group
         final newGroup = GroupedNotificationModel(
           notificationDate: dates['notificationDate']!,
           notifications: notifications,
+          isTriggered: true, // Auto-trigger when setup
         );
 
         final docRef = await _firestore.collection('Notifications').add(newGroup.toMap());
-        return docRef.id;
+        notificationId = docRef.id;
       }
+
+      // Immediately send notification to technicians and admins
+      await _sendGroupedNotification(notifications, assignedTechnicians);
+
+      return notificationId;
     } catch (e) {
       _logger.e('Error creating grouped notification: $e');
       rethrow;
     }
+  }
+
+  // Send immediate notification when setup
+  Future<void> _sendImmediateNotification(NotificationModel notification, List<String> technicianIds) async {
+    const title = 'Maintenance Scheduled';
+    final body = 'New maintenance task scheduled for ${notification.category}: ${notification.component}';
+
+    await sendNotificationToTechnicians(
+      technicianIds: technicianIds,
+      title: title,
+      body: body,
+      data: {
+        'type': 'maintenance_scheduled',
+        'category': notification.category,
+        'notificationDate': notification.notificationDate.toIso8601String(),
+      },
+    );
+  }
+
+  // Send grouped notification
+  Future<void> _sendGroupedNotification(List<NotificationModel> notifications, List<String> technicianIds) async {
+    final categories = notifications.map((n) => n.category).toSet().toList();
+    const title = 'Maintenance Scheduled';
+    final body = 'New maintenance tasks scheduled for ${categories.length} categories: ${categories.join(', ')}';
+
+    await sendNotificationToTechnicians(
+      technicianIds: technicianIds,
+      title: title,
+      body: body,
+      data: {
+        'type': 'maintenance_scheduled',
+        'categories': categories.join(','),
+        'taskCount': notifications.length.toString(),
+      },
+    );
   }
 
   // Get all technician user IDs
