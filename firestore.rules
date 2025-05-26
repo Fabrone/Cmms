@@ -1,18 +1,121 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /facilities/{facilityId} {
-      allow read, write: if true;
-      match /{collection}/{documentId} {
-        allow read, write: if collection in [
-          'survey_pdfs', 'drawings', 'documentations', 'reports', 'price_list',
-          'schedule_maintenance', 'scheduled_tasks', 'preventive_maintenance',
-          'vendors', 'equipment_supplied', 'inventory', 'requests', 'work_orders',
-          'kpis', 'users', 'locations', 'maintenance_settings', 'predefined_tasks',
-          'scheduled_tasks_attachments'
-        ];
-      }
+    // Facilities: Allow authenticated users to read and write
+    match /Facilities/{facilityId} {
+      allow read, write: if request.auth != null;
     }
+
+    // Users: Allow users to manage their own data, Admins/Developers to read and update role field
+    match /Users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && (
+        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
+      );
+      allow update: if request.auth != null && (
+        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
+      ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role']);
+    }
+
+    // Developers: Allow Developers to read/write, protect lead developer
+    match /Developers/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+        exists(/databases/$(database)/documents/Developers/$(request.auth.uid));
+      allow delete: if request.auth != null && 
+        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/Developers/$(userId)).data.email != 'lubangafabron@gmail.com';
+    }
+
+    // Admins: Allow Developers and Admins to read/write
+    match /Admins/{userId} {
+      allow read, write: if request.auth != null && (
+        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
+      );
+    }
+
+    // Technicians: Allow Admins to write (with organization), authenticated users to read
+    match /Technicians/{userId} {
+      allow write: if request.auth != null && 
+        exists(/databases/$(database)/documents/Admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/Admins/$(request.auth.uid)).data.organization in ['Embassy', 'JV Almacis'];
+      allow read: if request.auth != null;
+    }
+
+    // Admin Logs: Allow Developers and Admins to write, Developers to read
+    match /admin_logs/{logId} {
+      allow write: if request.auth != null && (
+        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
+      );
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/Developers/$(request.auth.uid));
+    }
+    
+    match /documents/{documentId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.resource.data.userId == request.auth.uid;
+    }
+    
+    // Existing lowercase maintenance_tasks rule
+    match /maintenance_tasks/{taskId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.resource.data.createdBy == request.auth.uid;
+    }
+    
+    // New rule for Maintenance_Tasks collection with proper capitalization
+    match /Maintenance_Tasks/{categoryId} {
+      // Allow developers full access to read, write, update, delete
+      allow read, write, update, delete: if request.auth != null && 
+        exists(/databases/$(database)/documents/Developers/$(request.auth.uid));
+      
+      // Allow technicians and admins to read only
+      allow read: if request.auth != null && (
+        exists(/databases/$(database)/documents/Technicians/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
+      );
+    }
+    
+    // Notifications: Allow developers to read/write, technicians and admins to read
+    match /Notifications/{notificationId} {
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/Developers/$(request.auth.uid));
+      allow read: if request.auth != null && (
+        exists(/databases/$(database)/documents/Technicians/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
+      );
+    }
+    
+    // TaskProgress: Allow all authenticated users to read/write their assigned tasks
+    match /TaskProgress/{taskId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (
+        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/Technicians/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
+      );
+    }
+    
+    // CategoryProgress: Allow all authenticated users to read, developers to write
+    match /CategoryProgress/{categoryId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (
+        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/Technicians/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
+      );
+    }
+    
+    // Email notifications queue
+    match /EmailNotifications/{emailId} {
+      allow write: if request.auth != null;
+      allow read: if false; // Only cloud functions should read these
+    }
+
+    // Default: Deny all other paths
     match /{path=**} {
       allow read, write: if false;
     }
