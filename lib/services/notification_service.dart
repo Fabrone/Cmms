@@ -5,6 +5,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/models/notification_model.dart';
 import 'package:cmms/models/maintenance_task_model.dart';
+import 'package:cmms/developer/notification_setup_screen.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -196,6 +197,86 @@ class NotificationService {
       }
     } catch (e) {
       _logger.e('Error creating notification: $e');
+      rethrow;
+    }
+  }
+
+  // Create grouped notification for multiple categories
+  Future<String> createGroupedNotification({
+    required List<CategoryInfo> categories,
+    required DateTime lastInspectionDate,
+    required List<String> assignedTechnicians,
+  }) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      // Use the shortest frequency among selected categories for notification timing
+      final shortestFrequency = categories
+          .map((c) => c.frequency)
+          .reduce((a, b) => a < b ? a : b);
+
+      final dates = calculateNotificationDates(
+        lastInspectionDate: lastInspectionDate,
+        frequencyMonths: shortestFrequency,
+      );
+
+      // Create notifications for all tasks in selected categories
+      final List<NotificationModel> notifications = [];
+      
+      for (final categoryInfo in categories) {
+        for (final task in categoryInfo.tasks) {
+          final notification = NotificationModel(
+            id: '',
+            taskId: '', // We'll use a generated ID since we're grouping
+            category: task.category,
+            component: task.component,
+            intervention: task.intervention,
+            frequency: task.frequency,
+            lastInspectionDate: lastInspectionDate,
+            nextInspectionDate: dates['nextInspectionDate']!,
+            notificationDate: dates['notificationDate']!,
+            assignedTechnicians: assignedTechnicians,
+            createdAt: DateTime.now(),
+            createdBy: user.uid,
+          );
+          notifications.add(notification);
+        }
+      }
+
+      // Check if there's already a grouped notification for this date
+      final existingGroupQuery = await _firestore
+          .collection('Notifications')
+          .where('notificationDate', isEqualTo: Timestamp.fromDate(dates['notificationDate']!))
+          .limit(1)
+          .get();
+
+      if (existingGroupQuery.docs.isNotEmpty) {
+        // Add to existing group
+        final existingDoc = existingGroupQuery.docs.first;
+        final existingGroup = GroupedNotificationModel.fromFirestore(existingDoc);
+        
+        final updatedNotifications = [...existingGroup.notifications, ...notifications];
+        final updatedGroup = GroupedNotificationModel(
+          notificationDate: existingGroup.notificationDate,
+          notifications: updatedNotifications,
+          isTriggered: existingGroup.isTriggered,
+        );
+
+        await existingDoc.reference.update(updatedGroup.toMap());
+        return existingDoc.id;
+      } else {
+        // Create new group
+        final newGroup = GroupedNotificationModel(
+          notificationDate: dates['notificationDate']!,
+          notifications: notifications,
+        );
+
+        final docRef = await _firestore.collection('Notifications').add(newGroup.toMap());
+        return docRef.id;
+      }
+    } catch (e) {
+      _logger.e('Error creating grouped notification: $e');
       rethrow;
     }
   }

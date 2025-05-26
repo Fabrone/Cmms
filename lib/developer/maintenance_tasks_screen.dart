@@ -387,33 +387,17 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
               Center(
                 child: ElevatedButton.icon(
                   onPressed: () async {
-                    // Get the latest task ID to setup notification for
-                    final latestTaskQuery = await _firestore
-                        .collection('Maintenance_Tasks')
-                        .orderBy('createdAt', descending: true)
-                        .limit(1)
-                        .get();
-                    
-                    if (latestTaskQuery.docs.isNotEmpty && mounted) {
-                      final doc = latestTaskQuery.docs.first;
-                      final task = MaintenanceTaskModel.fromFirestore(doc);
-                      final taskId = doc.id;
-                      
+                    if (mounted) {
                       final result = await Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => NotificationSetupScreen(
-                            task: task,
-                            taskId: taskId,
-                          ),
+                          builder: (context) => const NotificationSetupScreen(),
                         ),
                       );
                       
                       if (mounted && result == true) {
                         _resetForm();
                       }
-                    } else {
-                      _showSnackBar('Please save a task first before setting up notifications');
                     }
                   },
                   icon: const Icon(Icons.notifications_active),
