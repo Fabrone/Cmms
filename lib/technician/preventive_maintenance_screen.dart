@@ -278,9 +278,7 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                       child: StreamBuilder<QuerySnapshot>(
                         stream: FirebaseFirestore.instance
                             .collection('Notifications')
-                            .where('isTriggered', isEqualTo: true)
-                            .where('isCompleted', isEqualTo: false)
-                            .snapshots(),
+                            .snapshots(), // Removed the where clauses to show all notifications
                         builder: (context, snapshot) {
                           final notificationCount = snapshot.hasData ? snapshot.data!.docs.length : 0;
                           
@@ -730,9 +728,8 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('Notifications')
-                  .where('isTriggered', isEqualTo: true)
                   .orderBy('notificationDate', descending: true)
-                  .snapshots(),
+                  .snapshots(), // Removed the where clauses
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -781,17 +778,19 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                       elevation: 3,
                       child: ExpansionTile(
                         leading: CircleAvatar(
-                          backgroundColor: notification.isTriggered ? Colors.orange : Colors.blue,
-                          child: Text(
-                            '${notification.notifications.length}',
-                            style: GoogleFonts.poppins(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          backgroundColor: notification.isTriggered ? Colors.green : Colors.orange,
+                          child: notification.isTriggered 
+                              ? const Icon(Icons.check, color: Colors.white)
+                              : Text(
+                                  '${notification.notifications.length}',
+                                  style: GoogleFonts.poppins(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                         ),
                         title: Text(
-                          'Maintenance Due: ${DateFormat.yMMMd().format(notification.notificationDate)}',
+                          '${notification.isTriggered ? "Sent" : "Scheduled"}: ${DateFormat.yMMMd().format(notification.notificationDate)}',
                           style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
                         ),
                         subtitle: Text(
