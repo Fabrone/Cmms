@@ -21,6 +21,22 @@ class NotificationService {
   Future<void> initialize() async {
     await _initializeLocalNotifications();
     await _initializeFCM();
+    await _requestNotificationPermissions();
+  }
+
+  Future<void> _requestNotificationPermissions() async {
+    // Request notification permissions for iOS
+    await _messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+      provisional: false,
+    );
+
+    // For Android, request notification permission (Android 13+)
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
   }
 
   Future<void> _initializeLocalNotifications() async {
@@ -40,38 +56,71 @@ class NotificationService {
       initSettings,
       onDidReceiveNotificationResponse: _onNotificationTapped,
     );
+
+    // Create notification channel for Android
+    const androidChannel = AndroidNotificationChannel(
+      'maintenance_channel',
+      'Maintenance Notifications',
+      description: 'Notifications for maintenance task reminders',
+      importance: Importance.high,
+      playSound: true,
+    );
+
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(androidChannel);
   }
 
   Future<void> _initializeFCM() async {
-    await _messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
-
     // Get FCM token for this device
     final token = await _messaging.getToken();
     _logger.i('FCM Token: $token');
 
     // Save token to user document
     final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      await _firestore.collection('Users').doc(user.uid).update({
+    if (user != null && token != null) {
+      await _firestore.collection('Users').doc(user.uid).set({
         'fcmToken': token,
         'lastTokenUpdate': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
     }
+
+    // Handle token refresh
+    _messaging.onTokenRefresh.listen((newToken) async {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await _firestore.collection('Users').doc(user.uid).update({
+          'fcmToken': newToken,
+          'lastTokenUpdate': FieldValue.serverTimestamp(),
+        });
+      }
+    });
 
     // Handle foreground messages
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
     
     // Handle background messages
     FirebaseMessaging.onBackgroundMessage(_handleBackgroundMessage);
+
+    // Handle notification taps when app is in background
+    FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
+
+    // Handle notification tap when app is terminated
+    final initialMessage = await _messaging.getInitialMessage();
+    if (initialMessage != null) {
+      _handleNotificationTap(initialMessage);
+    }
   }
 
   void _onNotificationTapped(NotificationResponse response) {
-    _logger.i('Notification tapped: ${response.payload}');
-    // Handle notification tap - navigate to appropriate screen
+    _logger.i('Local notification tapped: ${response.payload}');
+    // Handle local notification tap - navigate to appropriate screen
+  }
+
+  void _handleNotificationTap(RemoteMessage message) {
+    _logger.i('FCM notification tapped: ${message.data}');
+    // Handle FCM notification tap - navigate to appropriate screen
+    // You can add navigation logic here
   }
 
   Future<void> _handleForegroundMessage(RemoteMessage message) async {
@@ -81,12 +130,13 @@ class NotificationService {
     await _showLocalNotification(
       title: message.notification?.title ?? 'Maintenance Reminder',
       body: message.notification?.body ?? 'You have maintenance tasks to check',
-      payload: message.data['payload'],
+      payload: message.data['notificationId'],
     );
   }
 
   static Future<void> _handleBackgroundMessage(RemoteMessage message) async {
     Logger().i('Background message: ${message.notification?.title}');
+    // Background messages are automatically displayed by the system
   }
 
   Future<void> _showLocalNotification({
@@ -100,9 +150,16 @@ class NotificationService {
       channelDescription: 'Notifications for maintenance task reminders',
       importance: Importance.high,
       priority: Priority.high,
+      showWhen: true,
+      icon: '@mipmap/ic_launcher',
+      largeIcon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
     );
 
-    const iosDetails = DarwinNotificationDetails();
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
     
     const details = NotificationDetails(
       android: androidDetails,
@@ -434,5 +491,31 @@ class NotificationService {
         .map((snapshot) => snapshot.docs
             .map((doc) => GroupedNotificationModel.fromFirestore(doc))
             .toList());
+  }
+
+  // Manual trigger for testing
+  Future<void> triggerTestNotification() async {
+    try {
+      const title = 'Test Maintenance Reminder';
+      const body = 'This is a test notification for maintenance tasks.';
+
+      // Get all technician IDs
+      final technicianIds = await getTechnicianIds();
+
+      // Send notifications
+      await sendNotificationToTechnicians(
+        technicianIds: technicianIds,
+        title: title,
+        body: body,
+        data: {
+          'type': 'test_notification',
+          'timestamp': DateTime.now().toIso8601String(),
+        },
+      );
+
+      _logger.i('Test notification sent to ${technicianIds.length} technicians');
+    } catch (e) {
+      _logger.e('Error sending test notification: $e');
+    }
   }
 }
