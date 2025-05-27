@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/models/maintenance_task_model.dart';
 import 'package:cmms/developer/notification_setup_screen.dart';
+import 'package:cmms/services/notification_service.dart';
 
 class MaintenanceTasksScreen extends StatefulWidget {
   const MaintenanceTasksScreen({super.key});
@@ -404,6 +405,30 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
                   label: Text('Setup Notification', style: GoogleFonts.poppins()),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                ),
+              ),
+            ],
+            // Test Notification Button (only show when not editing)
+            if (_selectedDocId == null) ...[
+              const SizedBox(height: 12),
+              Center(
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    try {
+                      await NotificationService().triggerTestNotification();
+                      _showSnackBar('Test notification sent successfully!');
+                    } catch (e) {
+                      _showSnackBar('Error sending test notification: $e');
+                    }
+                  },
+                  icon: const Icon(Icons.send),
+                  label: Text('Send Test Notification', style: GoogleFonts.poppins()),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
