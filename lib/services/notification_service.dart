@@ -6,6 +6,7 @@ import 'package:logger/logger.dart';
 import 'package:cmms/models/notification_model.dart';
 import 'package:cmms/models/maintenance_task_model.dart';
 import 'package:cmms/developer/notification_setup_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -17,15 +18,18 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
   final Logger _logger = Logger();
 
+  // Notification counter stream
+  static const String _notificationCountKey = 'notification_count';
+  
   // Initialize notification service
   Future<void> initialize() async {
     await _initializeLocalNotifications();
     await _initializeFCM();
     await _requestNotificationPermissions();
+    await _setupNotificationListeners();
   }
 
   Future<void> _requestNotificationPermissions() async {
-    // Request notification permissions for iOS
     await _messaging.requestPermission(
       alert: true,
       badge: true,
@@ -33,14 +37,13 @@ class NotificationService {
       provisional: false,
     );
 
-    // For Android, request notification permission (Android 13+)
     await _localNotifications
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
   }
 
   Future<void> _initializeLocalNotifications() async {
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings('@mipmap/launcher_icon');
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
@@ -72,11 +75,9 @@ class NotificationService {
   }
 
   Future<void> _initializeFCM() async {
-    // Get FCM token for this device
     final token = await _messaging.getToken();
     _logger.i('FCM Token: $token');
 
-    // Save token to user document
     final user = FirebaseAuth.instance.currentUser;
     if (user != null && token != null) {
       await _firestore.collection('Users').doc(user.uid).set({
@@ -85,7 +86,6 @@ class NotificationService {
       }, SetOptions(merge: true));
     }
 
-    // Handle token refresh
     _messaging.onTokenRefresh.listen((newToken) async {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
@@ -95,7 +95,9 @@ class NotificationService {
         });
       }
     });
+  }
 
+  Future<void> _setupNotificationListeners() async {
     // Handle foreground messages
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
     
@@ -114,17 +116,19 @@ class NotificationService {
 
   void _onNotificationTapped(NotificationResponse response) {
     _logger.i('Local notification tapped: ${response.payload}');
-    // Handle local notification tap - navigate to appropriate screen
+    resetNotificationCount();
   }
 
   void _handleNotificationTap(RemoteMessage message) {
     _logger.i('FCM notification tapped: ${message.data}');
-    // Handle FCM notification tap - navigate to appropriate screen
-    // You can add navigation logic here
+    resetNotificationCount();
   }
 
   Future<void> _handleForegroundMessage(RemoteMessage message) async {
     _logger.i('Foreground message: ${message.notification?.title}');
+    
+    // Increment notification count
+    await _incrementNotificationCount();
     
     // Show local notification when app is in foreground
     await _showLocalNotification(
@@ -136,7 +140,10 @@ class NotificationService {
 
   static Future<void> _handleBackgroundMessage(RemoteMessage message) async {
     Logger().i('Background message: ${message.notification?.title}');
-    // Background messages are automatically displayed by the system
+    // Increment notification count for background messages
+    final prefs = await SharedPreferences.getInstance();
+    final currentCount = prefs.getInt(_notificationCountKey) ?? 0;
+    await prefs.setInt(_notificationCountKey, currentCount + 1);
   }
 
   Future<void> _showLocalNotification({
@@ -151,8 +158,8 @@ class NotificationService {
       importance: Importance.high,
       priority: Priority.high,
       showWhen: true,
-      icon: '@mipmap/ic_launcher',
-      largeIcon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+      icon: '@mipmap/launcher_icon',
+      largeIcon: DrawableResourceAndroidBitmap('@mipmap/launcher_icon'),
     );
 
     const iosDetails = DarwinNotificationDetails(
@@ -173,6 +180,30 @@ class NotificationService {
       details,
       payload: payload,
     );
+  }
+
+  // Notification count management
+  Future<void> _incrementNotificationCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final currentCount = prefs.getInt(_notificationCountKey) ?? 0;
+    await prefs.setInt(_notificationCountKey, currentCount + 1);
+  }
+
+  Future<void> resetNotificationCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_notificationCountKey, 0);
+  }
+
+  Future<int> getNotificationCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_notificationCountKey) ?? 0;
+  }
+
+  Stream<int> getNotificationCountStream() async* {
+    while (true) {
+      yield await getNotificationCount();
+      await Future.delayed(const Duration(seconds: 1));
+    }
   }
 
   // Calculate notification dates
@@ -289,7 +320,7 @@ class NotificationService {
         for (final task in categoryInfo.tasks) {
           final notification = NotificationModel(
             id: '',
-            taskId: '', // We'll use a generated ID since we're grouping
+            taskId: '',
             category: task.category,
             component: task.component,
             intervention: task.intervention,
@@ -357,133 +388,31 @@ class NotificationService {
     }
   }
 
-  // Send notification to technicians
-  Future<void> sendNotificationToTechnicians({
-    required List<String> technicianIds,
-    required String title,
-    required String body,
-    Map<String, dynamic>? data,
-  }) async {
-    try {
-      for (final technicianId in technicianIds) {
-        // Get technician's FCM token
-        final userDoc = await _firestore.collection('Users').doc(technicianId).get();
-        if (userDoc.exists) {
-          final userData = userDoc.data() as Map<String, dynamic>;
-          final fcmToken = userData['fcmToken'] as String?;
-          final email = userData['email'] as String?;
-
-          if (fcmToken != null) {
-            // Send FCM notification
-            await _sendFCMNotification(
-              token: fcmToken,
-              title: title,
-              body: body,
-              data: data,
-            );
-          }
-
-          if (email != null) {
-            // Send email notification
-            await _sendEmailNotification(
-              email: email,
-              title: title,
-              body: body,
-            );
-          }
-        }
-      }
-    } catch (e) {
-      _logger.e('Error sending notifications to technicians: $e');
-    }
-  }
-
-  Future<void> _sendFCMNotification({
-    required String token,
-    required String title,
-    required String body,
-    Map<String, dynamic>? data,
-  }) async {
-    // This would typically use Firebase Admin SDK or a cloud function
-    // For now, we'll log the notification
-    _logger.i('Sending FCM notification to token: $token');
-    _logger.i('Title: $title, Body: $body');
-  }
-
-  Future<void> _sendEmailNotification({
-    required String email,
-    required String title,
-    required String body,
-  }) async {
-    try {
-      // Store email notification request in Firestore for cloud function to process
-      await _firestore.collection('EmailNotifications').add({
-        'to': email,
-        'subject': title,
-        'body': body,
-        'timestamp': FieldValue.serverTimestamp(),
-        'processed': false,
-      });
-      
-      _logger.i('Email notification queued for: $email');
-    } catch (e) {
-      _logger.e('Error queuing email notification: $e');
-    }
-  }
-
-  // Check and trigger due notifications
-  Future<void> checkAndTriggerNotifications() async {
-    try {
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-
-      final dueNotificationsQuery = await _firestore
-          .collection('Notifications')
-          .where('notificationDate', isLessThanOrEqualTo: Timestamp.fromDate(today))
-          .where('isTriggered', isEqualTo: false)
-          .get();
-
-      for (final doc in dueNotificationsQuery.docs) {
-        final groupedNotification = GroupedNotificationModel.fromFirestore(doc);
-        
-        // Create notification message
-        const categories = <String>[];
-        for (final notification in groupedNotification.notifications) {
-          if (!categories.contains(notification.category)) {
-            categories.add(notification.category);
-          }
-        }
-        
-        const title = 'Maintenance Reminder';
-        final body = 'You have ${groupedNotification.notifications.length} maintenance tasks due in categories: ${categories.join(', ')}';
-
-        // Get all technician IDs
-        final technicianIds = await getTechnicianIds();
-
-        // Send notifications
-        await sendNotificationToTechnicians(
-          technicianIds: technicianIds,
-          title: title,
-          body: body,
-          data: {
-            'notificationId': doc.id,
-            'type': 'maintenance_reminder',
-            'taskCount': groupedNotification.notifications.length.toString(),
-          },
-        );
-
-        // Mark as triggered
-        await doc.reference.update({'isTriggered': true});
-        
-        _logger.i('Triggered notification for ${groupedNotification.notifications.length} tasks');
-      }
-    } catch (e) {
-      _logger.e('Error checking and triggering notifications: $e');
-    }
-  }
-
   // Get pending notifications for a user
   Stream<List<GroupedNotificationModel>> getPendingNotifications() {
+    return _firestore
+        .collection('Notifications')
+        .orderBy('notificationDate', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => GroupedNotificationModel.fromFirestore(doc))
+            .toList());
+  }
+
+  // Get received notifications (triggered ones)
+  Stream<List<GroupedNotificationModel>> getReceivedNotifications() {
+    return _firestore
+        .collection('Notifications')
+        .where('isTriggered', isEqualTo: true)
+        .orderBy('notificationDate', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => GroupedNotificationModel.fromFirestore(doc))
+            .toList());
+  }
+
+  // Get setup notifications (all notifications with their status)
+  Stream<List<GroupedNotificationModel>> getSetupNotifications() {
     return _firestore
         .collection('Notifications')
         .orderBy('notificationDate', descending: true)
@@ -499,23 +428,34 @@ class NotificationService {
       const title = 'Test Maintenance Reminder';
       const body = 'This is a test notification for maintenance tasks.';
 
-      // Get all technician IDs
-      final technicianIds = await getTechnicianIds();
-
-      // Send notifications
-      await sendNotificationToTechnicians(
-        technicianIds: technicianIds,
+      // Show local notification
+      await _showLocalNotification(
         title: title,
         body: body,
-        data: {
-          'type': 'test_notification',
-          'timestamp': DateTime.now().toIso8601String(),
-        },
       );
 
-      _logger.i('Test notification sent to ${technicianIds.length} technicians');
+      // Increment notification count
+      await _incrementNotificationCount();
+
+      _logger.i('Test notification triggered');
     } catch (e) {
       _logger.e('Error sending test notification: $e');
     }
+  }
+
+  // Get urgent notifications for widget display
+  Stream<List<GroupedNotificationModel>> getUrgentNotifications() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    
+    return _firestore
+        .collection('Notifications')
+        .where('notificationDate', isLessThanOrEqualTo: Timestamp.fromDate(today))
+        .where('isTriggered', isEqualTo: true)
+        .orderBy('notificationDate', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => GroupedNotificationModel.fromFirestore(doc))
+            .toList());
   }
 }
