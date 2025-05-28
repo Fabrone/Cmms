@@ -4,6 +4,7 @@ import 'package:logger/logger.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cmms/models/maintenance_task_model.dart';
 import 'package:cmms/services/notification_service.dart';
+import 'package:cmms/screens/notification_setup_tracking_screen.dart';
 
 class CategoryInfo {
   final String category;
@@ -100,9 +101,9 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
   void _selectLastInspectionDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now().subtract(const Duration(days: 30)), // Default to 30 days ago
-      firstDate: DateTime(2020), // Allow dates from 2020
-      lastDate: DateTime.now(), // Don't allow future dates for last inspection
+      initialDate: DateTime.now().subtract(const Duration(days: 30)),
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
       helpText: 'Select Last Inspection Date',
       cancelText: 'Cancel',
       confirmText: 'Select',
@@ -172,7 +173,7 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
       logger.i('Grouped notification created with ID: $notificationId');
       
       if (mounted) {
-        Navigator.pop(context, true); // Return true to indicate success
+        Navigator.pop(context, true);
       }
       
     } catch (e) {
@@ -209,6 +210,20 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
             icon: const Icon(Icons.arrow_back, color: Colors.white),
             onPressed: () => Navigator.pop(context),
           ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.track_changes, color: Colors.white),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const NotificationSetupTrackingScreen(),
+                  ),
+                );
+              },
+              tooltip: 'Track Notifications',
+            ),
+          ],
         ),
         body: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -420,7 +435,7 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
                                       ),
                                       const SizedBox(height: 8),
                                       Text(
-                                        'Technicians will be notified 5 days before the next inspection is due. All selected categories will be grouped in one notification.',
+                                        'Technicians will be notified at 9:00 AM, 5 days before the next inspection is due. All selected categories will be grouped in one notification.',
                                         style: GoogleFonts.poppins(
                                           color: Colors.blue[700],
                                           fontSize: 13,

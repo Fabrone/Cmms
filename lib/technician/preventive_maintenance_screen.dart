@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+//import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +7,9 @@ import 'package:cmms/models/notification_model.dart';
 import 'package:cmms/models/task_status_model.dart';
 import 'package:cmms/models/task_display_model.dart';
 import 'package:cmms/services/task_display_service.dart';
+import 'package:cmms/services/notification_service.dart';
+import 'package:cmms/widgets/floating_notification_widget.dart';
+import 'package:cmms/screens/notification_details_screen.dart';
 
 class PreventiveMaintenanceScreen extends StatefulWidget {
   final String facilityId;
@@ -25,11 +28,13 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
   String? _selectedCategory;
   
   final TaskDisplayService _taskDisplayService = TaskDisplayService();
+  final NotificationService _notificationService = NotificationService();
 
   @override
   void initState() {
     super.initState();
     _logger.i('PreventiveMaintenanceScreen initialized: facilityId=${widget.facilityId}');
+    _notificationService.initialize();
   }
 
   Future<void> _updateTaskStatus(TaskDisplayModel task, TaskStatus newStatus) async {
@@ -41,10 +46,9 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
 
       String? notes;
       
-      // Show dialog for notes if marking as in progress or completed
       if (newStatus != TaskStatus.waiting) {
         notes = await _showNotesDialog(newStatus);
-        if (notes == null) return; // User cancelled
+        if (notes == null) return;
       }
 
       await _taskDisplayService.updateTaskStatus(
@@ -245,96 +249,132 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
     return ScaffoldMessenger(
       key: _messengerKey,
       child: Scaffold(
-        appBar: AppBar(
-          title: Text('Maintenance Tasks', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.blueGrey,
-          iconTheme: const IconThemeData(color: Colors.white),
-        ),
-        body: SafeArea(
-          child: Column(
-            children: [
-              // Tab Selection
-              Container(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => setState(() {
-                          _selectedTab = 'Tasks';
-                          _selectedCategory = null;
-                        }),
-                        icon: const Icon(Icons.assignment),
-                        label: Text('Tasks', style: GoogleFonts.poppins()),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _selectedTab == 'Tasks' ? Colors.blueGrey : Colors.grey[300],
-                          foregroundColor: _selectedTab == 'Tasks' ? Colors.white : Colors.black,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
+        body: Stack(
+          children: [
+            // Main content
+            SafeArea(
+              child: Column(
+                children: [
+                  // App Bar
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.blueGrey,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.1),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
                         ),
-                      ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance
-                            .collection('Notifications')
-                            .snapshots(), // Removed the where clauses to show all notifications
-                        builder: (context, snapshot) {
-                          final notificationCount = snapshot.hasData ? snapshot.data!.docs.length : 0;
-                          
-                          return Stack(
-                            children: [
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton.icon(
-                                  onPressed: () => setState(() {
-                                    _selectedTab = 'Notifications';
-                                    _selectedCategory = null;
-                                  }),
-                                  icon: const Icon(Icons.notifications),
-                                  label: Text('Notifications', style: GoogleFonts.poppins()),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: _selectedTab == 'Notifications' ? Colors.blueGrey : Colors.grey[300],
-                                    foregroundColor: _selectedTab == 'Notifications' ? Colors.white : Colors.black,
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                  ),
-                                ),
-                              ),
-                              if (notificationCount > 0)
-                                Positioned(
-                                  right: 8,
-                                  top: 4,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(4),
-                                    decoration: const BoxDecoration(
-                                      color: Colors.red,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Text(
-                                      '$notificationCount',
-                                      style: GoogleFonts.poppins(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
+                    child: Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        ),
+                        Expanded(
+                          child: Text(
+                            'Maintenance Tasks',
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  // Tab Selection
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => setState(() {
+                              _selectedTab = 'Tasks';
+                              _selectedCategory = null;
+                            }),
+                            icon: const Icon(Icons.assignment),
+                            label: Text('Tasks', style: GoogleFonts.poppins()),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _selectedTab == 'Tasks' ? Colors.blueGrey : Colors.grey[300],
+                              foregroundColor: _selectedTab == 'Tasks' ? Colors.white : Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: StreamBuilder<int>(
+                            stream: _notificationService.getNotificationCountStream(),
+                            builder: (context, snapshot) {
+                              final notificationCount = snapshot.data ?? 0;
+                              
+                              return Stack(
+                                children: [
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () => setState(() {
+                                        _selectedTab = 'Notifications';
+                                        _selectedCategory = null;
+                                        // Reset count when tab is opened
+                                        _notificationService.resetNotificationCount();
+                                      }),
+                                      icon: const Icon(Icons.notifications),
+                                      label: Text('Notifications', style: GoogleFonts.poppins()),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: _selectedTab == 'Notifications' ? Colors.blueGrey : Colors.grey[300],
+                                        foregroundColor: _selectedTab == 'Notifications' ? Colors.white : Colors.black,
+                                        padding: const EdgeInsets.symmetric(vertical: 12),
                                       ),
                                     ),
                                   ),
-                                ),
-                            ],
-                          );
-                        },
-                      ),
+                                  if (notificationCount > 0)
+                                    Positioned(
+                                      right: 8,
+                                      top: 4,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: const BoxDecoration(
+                                          color: Colors.red,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Text(
+                                          '$notificationCount',
+                                          style: GoogleFonts.poppins(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  
+                  // Content
+                  Expanded(
+                    child: _selectedTab == 'Tasks' ? _buildTasksTab() : _buildNotificationsTab(),
+                  ),
+                ],
               ),
-              
-              // Content
-              Expanded(
-                child: _selectedTab == 'Tasks' ? _buildTasksTab() : _buildNotificationsTab(),
-              ),
-            ],
-          ),
+            ),
+            
+            // Floating notification widget
+            const FloatingNotificationWidget(),
+          ],
         ),
       ),
     );
@@ -725,11 +765,8 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
           const SizedBox(height: 16),
           
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('Notifications')
-                  .orderBy('notificationDate', descending: true)
-                  .snapshots(), // Removed the where clauses
+            child: StreamBuilder<List<GroupedNotificationModel>>(
+              stream: _notificationService.getReceivedNotifications(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -741,7 +778,7 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                   );
                 }
                 
-                final notifications = snapshot.data?.docs ?? [];
+                final notifications = snapshot.data ?? [];
                 
                 if (notifications.isEmpty) {
                   return Center(
@@ -751,7 +788,7 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                         Icon(Icons.notifications_none, size: 64, color: Colors.grey[400]),
                         const SizedBox(height: 16),
                         Text(
-                          'No notifications found',
+                          'No received notifications',
                           style: GoogleFonts.poppins(
                             fontSize: 18,
                             color: Colors.grey[600],
@@ -759,7 +796,7 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Maintenance notifications will appear here',
+                          'Received maintenance notifications will appear here',
                           style: GoogleFonts.poppins(color: Colors.grey[500]),
                         ),
                       ],
@@ -771,88 +808,89 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                   itemCount: notifications.length,
                   itemBuilder: (context, index) {
                     final doc = notifications[index];
-                    final notification = GroupedNotificationModel.fromFirestore(doc);
                     
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
                       elevation: 3,
-                      child: ExpansionTile(
-                        leading: CircleAvatar(
-                          backgroundColor: notification.isTriggered ? Colors.green : Colors.orange,
-                          child: notification.isTriggered 
-                              ? const Icon(Icons.check, color: Colors.white)
-                              : Text(
-                                  '${notification.notifications.length}',
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => NotificationDetailsScreen(notifications: [doc]),
+                            ),
+                          );
+                        },
+                        child: ExpansionTile(
+                          leading: const CircleAvatar(
+                            backgroundColor: Colors.green,
+                            child: Icon(Icons.check, color: Colors.white),
+                          ),
+                          title: Text(
+                            'Received: ${DateFormat.yMMMd().format(doc.notificationDate)}',
+                            style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Text(
+                            '${doc.notifications.length} tasks in ${doc.notifications.map((n) => n.category).toSet().length} categories',
+                            style: GoogleFonts.poppins(),
+                          ),
+                          children: doc.notifications.map((task) {
+                            return ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                              leading: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.blueGrey[100],
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  task.category,
                                   style: GoogleFonts.poppins(
-                                    color: Colors.white,
                                     fontWeight: FontWeight.bold,
+                                    fontSize: 12,
                                   ),
                                 ),
-                        ),
-                        title: Text(
-                          '${notification.isTriggered ? "Sent" : "Scheduled"}: ${DateFormat.yMMMd().format(notification.notificationDate)}',
-                          style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Text(
-                          '${notification.notifications.length} tasks in ${notification.notifications.map((n) => n.category).toSet().length} categories',
-                          style: GoogleFonts.poppins(),
-                        ),
-                        children: notification.notifications.map((task) {
-                          return ListTile(
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                            leading: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.blueGrey[100],
-                                borderRadius: BorderRadius.circular(4),
                               ),
-                              child: Text(
-                                task.category,
+                              title: Text(
+                                task.component,
+                                style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    task.intervention,
+                                    style: GoogleFonts.poppins(fontSize: 12),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Last Inspection: ${DateFormat.yMMMd().format(task.lastInspectionDate)}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 11,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                  Text(
+                                    'Next Inspection: ${DateFormat.yMMMd().format(task.nextInspectionDate)}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 11,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              trailing: Text(
+                                '${task.frequency}m',
                                 style: GoogleFonts.poppins(
-                                  fontWeight: FontWeight.bold,
+                                  color: Colors.grey[600],
                                   fontSize: 12,
                                 ),
                               ),
-                            ),
-                            title: Text(
-                              task.component,
-                              style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  task.intervention,
-                                  style: GoogleFonts.poppins(fontSize: 12),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Last Inspection: ${DateFormat.yMMMd().format(task.lastInspectionDate)}',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 11,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                                Text(
-                                  'Next Inspection: ${DateFormat.yMMMd().format(task.nextInspectionDate)}',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 11,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            trailing: Text(
-                              '${task.frequency}m',
-                              style: GoogleFonts.poppins(
-                                color: Colors.grey[600],
-                                fontSize: 12,
-                              ),
-                            ),
-                          );
-                        }).toList(),
+                            );
+                          }).toList(),
+                        ),
                       ),
                     );
                   },
