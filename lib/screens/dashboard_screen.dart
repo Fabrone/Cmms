@@ -1,5 +1,6 @@
 import 'package:cmms/developer/developer_screen.dart';
 import 'package:cmms/display%20screens/facility_screen.dart';
+import 'package:cmms/display%20screens/price_list_screen.dart';
 import 'package:cmms/display%20screens/reports_screen.dart';
 //import 'package:cmms/display%20screens/preventive_maintenance_screen.dart';
 import 'package:cmms/display%20screens/role_assignment_screen.dart';
@@ -10,7 +11,7 @@ import 'package:cmms/screens/drawings_screen.dart';
 import 'package:cmms/screens/equipment_supplied_screen.dart';
 import 'package:cmms/screens/inventory_screen.dart';
 import 'package:cmms/screens/kpi_screen.dart';
-import 'package:cmms/screens/price_list_screen.dart';
+//import 'package:cmms/screens/price_list_screen.dart';
 //import 'package:cmms/screens/reports_screen.dart';
 import 'package:cmms/screens/request_screen.dart';
 import 'package:cmms/screens/user_screen.dart';
@@ -268,6 +269,9 @@ class DashboardScreenState extends State<DashboardScreen> {
     },
     'Technician': {
       'Embassy': [
+        {'title': 'Building Survey', 'icon': Icons.account_balance},
+        {'title': 'Documentations', 'icon': Icons.description},
+        {'title': 'Drawings', 'icon': Icons.brush},
         {'title': 'Scheduled Maintenance', 'icon': Icons.event},
         {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
         {'title': 'Reports', 'icon': Icons.bar_chart},
@@ -276,6 +280,9 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Work Orders', 'icon': Icons.work},
       ],
       'JV Almacis': [
+        {'title': 'Building Survey', 'icon': Icons.account_balance},
+        {'title': 'Documentations', 'icon': Icons.description},
+        {'title': 'Drawings', 'icon': Icons.brush},
         {'title': 'Scheduled Maintenance', 'icon': Icons.event},
         {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
         {'title': 'Reports', 'icon': Icons.bar_chart},
