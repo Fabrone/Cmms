@@ -1,6 +1,9 @@
+import 'dart:async';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/models/notification_model.dart';
@@ -27,6 +30,14 @@ class NotificationService {
     await _initializeFCM();
     await _requestNotificationPermissions();
     await _setupNotificationListeners();
+    
+    // Check for due notifications on startup
+    await checkForDueNotifications();
+    
+    // Set up periodic check for due notifications
+    Timer.periodic(const Duration(hours: 1), (_) {
+      checkForDueNotifications();
+    });
   }
 
   Future<void> _requestNotificationPermissions() async {
@@ -60,13 +71,15 @@ class NotificationService {
       onDidReceiveNotificationResponse: _onNotificationTapped,
     );
 
-    // Create notification channel for Android
+    // Create notification channel for Android with proper theming
     const androidChannel = AndroidNotificationChannel(
       'maintenance_channel',
       'Maintenance Notifications',
       description: 'Notifications for maintenance task reminders',
       importance: Importance.high,
       playSound: true,
+      enableVibration: true,
+      ledColor: Colors.blueGrey, // BlueGrey color
     );
 
     await _localNotifications
@@ -130,7 +143,7 @@ class NotificationService {
     // Increment notification count
     await _incrementNotificationCount();
     
-    // Show local notification when app is in foreground
+    // Show local notification when app is in foreground with proper theming
     await _showLocalNotification(
       title: message.notification?.title ?? 'Maintenance Reminder',
       body: message.notification?.body ?? 'You have maintenance tasks to check',
@@ -160,12 +173,21 @@ class NotificationService {
       showWhen: true,
       icon: '@mipmap/launcher_icon',
       largeIcon: DrawableResourceAndroidBitmap('@mipmap/launcher_icon'),
+      color: Colors.blueGrey, // BlueGrey color
+      enableVibration: true,
+      playSound: true,
+      sound: RawResourceAndroidNotificationSound('notification'),
+      enableLights: true,
+      ledColor: Colors.blueGrey,
+      ledOnMs: 1000,
+      ledOffMs: 500,
     );
 
     const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
+      sound: 'default',
     );
     
     const details = NotificationDetails(
@@ -187,6 +209,11 @@ class NotificationService {
     final prefs = await SharedPreferences.getInstance();
     final currentCount = prefs.getInt(_notificationCountKey) ?? 0;
     await prefs.setInt(_notificationCountKey, currentCount + 1);
+  }
+
+  // Public method to increment notification count (called from main.dart)
+  Future<void> incrementNotificationCount() async {
+    await _incrementNotificationCount();
   }
 
   Future<void> resetNotificationCount() async {
@@ -219,6 +246,76 @@ class NotificationService {
       'nextInspectionDate': nextInspectionDate,
       'notificationDate': notificationDate,
     };
+  }
+
+  // Schedule a notification for a maintenance task
+  Future<String> scheduleNotification({
+    required String category,
+    required String component,
+    required String intervention,
+    required DateTime notificationDate,
+    required String facilityId,
+    required String taskId,
+  }) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      final notification = NotificationModel(
+        id: '',
+        taskId: taskId,
+        category: category,
+        component: component,
+        intervention: intervention,
+        frequency: 1, // Default frequency
+        lastInspectionDate: DateTime.now(),
+        nextInspectionDate: notificationDate,
+        notificationDate: notificationDate,
+        assignedTechnicians: [],
+        createdAt: DateTime.now(),
+        createdBy: user.uid,
+      );
+
+      // Check if there's already a grouped notification for this date
+      final existingGroupQuery = await _firestore
+          .collection('Notifications')
+          .where('notificationDate', isEqualTo: Timestamp.fromDate(notificationDate))
+          .limit(1)
+          .get();
+
+      String notificationId;
+      if (existingGroupQuery.docs.isNotEmpty) {
+        // Add to existing group
+        final existingDoc = existingGroupQuery.docs.first;
+        final existingGroup = GroupedNotificationModel.fromFirestore(existingDoc);
+        
+        final updatedNotifications = [...existingGroup.notifications, notification];
+        final updatedGroup = GroupedNotificationModel(
+          notificationDate: existingGroup.notificationDate,
+          notifications: updatedNotifications,
+          isTriggered: false,
+        );
+
+        await existingDoc.reference.update(updatedGroup.toMap());
+        notificationId = existingDoc.id;
+      } else {
+        // Create new group
+        final newGroup = GroupedNotificationModel(
+          notificationDate: notificationDate,
+          notifications: [notification],
+          isTriggered: false,
+        );
+
+        final docRef = await _firestore.collection('Notifications').add(newGroup.toMap());
+        notificationId = docRef.id;
+      }
+
+      _logger.i('Scheduled notification for task: $taskId, facility: $facilityId, date: $notificationDate');
+      return notificationId;
+    } catch (e) {
+      _logger.e('Error scheduling notification: $e');
+      rethrow;
+    }
   }
 
   // Create notification for a maintenance task
@@ -443,19 +540,65 @@ class NotificationService {
     }
   }
 
-  // Get urgent notifications for widget display
-  Stream<List<GroupedNotificationModel>> getUrgentNotifications() {
+  // Get today's triggered notifications only (for floating widget)
+  Stream<List<GroupedNotificationModel>> getTodaysTriggeredNotifications() {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     
     return _firestore
         .collection('Notifications')
-        .where('notificationDate', isLessThanOrEqualTo: Timestamp.fromDate(today))
+        .where('notificationDate', isEqualTo: Timestamp.fromDate(today))
         .where('isTriggered', isEqualTo: true)
+        .orderBy('triggeredAt', descending: true)
+        .limit(1) // Only get the latest notification for today
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => GroupedNotificationModel.fromFirestore(doc))
+            .toList());
+  }
+
+  // Get urgent notifications for widget display (deprecated - use getTodaysTriggeredNotifications)
+  Stream<List<GroupedNotificationModel>> getUrgentNotifications() {
+    return getTodaysTriggeredNotifications();
+  }
+
+  // Add a new method to get both scheduled and received notifications
+  Stream<List<GroupedNotificationModel>> getAllNotifications() {
+    return _firestore
+        .collection('Notifications')
         .orderBy('notificationDate', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs
             .map((doc) => GroupedNotificationModel.fromFirestore(doc))
             .toList());
+  }
+
+  // Add a method to check for due notifications that haven't been triggered
+  Future<void> checkForDueNotifications() async {
+    try {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      
+      final dueNotificationsSnapshot = await _firestore
+          .collection('Notifications')
+          .where('notificationDate', isLessThanOrEqualTo: Timestamp.fromDate(today))
+          .where('isTriggered', isEqualTo: false)
+          .get();
+      
+      if (dueNotificationsSnapshot.docs.isNotEmpty) {
+        _logger.i('Found ${dueNotificationsSnapshot.docs.length} due notifications that need to be triggered');
+      
+        // Call the cloud function to trigger these notifications
+        try {
+          final functions = FirebaseFunctions.instance;
+          final result = await functions.httpsCallable('triggerNotificationsManually').call();
+          _logger.i('Manual trigger result: ${result.data}');
+        } catch (e) {
+          _logger.e('Error calling cloud function: $e');
+        }
+      }
+    } catch (e) {
+      _logger.e('Error checking for due notifications: $e');
+    }
   }
 }

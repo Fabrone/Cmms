@@ -22,7 +22,7 @@ class NotificationDetailsScreen extends StatelessWidget {
             fontWeight: FontWeight.bold,
           ),
         ),
-        backgroundColor: Colors.orange[600],
+        backgroundColor: Colors.blueGrey,
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
       ),
@@ -32,8 +32,8 @@ class NotificationDetailsScreen extends StatelessWidget {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Colors.orange[600]!,
-              Colors.orange[50]!,
+              Colors.blueGrey,
+              Colors.blueGrey[50]!,
             ],
             stops: const [0.0, 0.3],
           ),
@@ -110,14 +110,14 @@ class NotificationDetailsScreen extends StatelessWidget {
         leading: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.orange[100],
+            color: Colors.blue[100],
             shape: BoxShape.circle,
           ),
           child: Text(
             '${group.notifications.length}',
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.bold,
-              color: Colors.orange[700],
+              color: Colors.blue[700],
             ),
           ),
         ),
@@ -146,16 +146,16 @@ class NotificationDetailsScreen extends StatelessWidget {
               children: categories.map((category) => Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.orange[50],
+                  color: Colors.blue[50],
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.orange[200]!),
+                  border: Border.all(color: Colors.blue[200]!),
                 ),
                 child: Text(
                   category,
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
-                    color: Colors.orange[700],
+                    color: Colors.blue[700],
                   ),
                 ),
               )).toList(),
@@ -195,7 +195,7 @@ class NotificationDetailsScreen extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.orange[100],
+                        color: Colors.blue[100],
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -203,7 +203,7 @@ class NotificationDetailsScreen extends StatelessWidget {
                         style: GoogleFonts.poppins(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: Colors.orange[700],
+                          color: Colors.blue[700],
                         ),
                       ),
                     ),
