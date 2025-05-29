@@ -81,7 +81,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 fontSize: 18,
               ),
             ),
-            backgroundColor: Colors.blue,
+            backgroundColor: Colors.blueGrey,
             iconTheme: const IconThemeData(color: Colors.white),
             leading: IconButton(
               onPressed: () => Navigator.pop(context),
@@ -99,7 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: GoogleFonts.poppins(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
-                    color: Colors.blue[800],
+                    color: Colors.blueGrey[800],
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -123,12 +123,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(height: 16),
                         
                         ListTile(
-                          leading: const Icon(Icons.person, color: Colors.blue),
+                          leading: const Icon(Icons.person, color: Colors.blueGrey),
                           title: Text('Profile', style: GoogleFonts.poppins()),
                           subtitle: Text('View and edit your profile', style: GoogleFonts.poppins(fontSize: 12)),
                           trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                           onTap: () {
-
                             _messengerKey.currentState?.showSnackBar(
                               SnackBar(content: Text('Profile feature coming soon', style: GoogleFonts.poppins())),
                             );
@@ -138,12 +137,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const Divider(),
                         
                         ListTile(
-                          leading: const Icon(Icons.notifications, color: Colors.blue),
+                          leading: const Icon(Icons.notifications, color: Colors.blueGrey),
                           title: Text('Notifications', style: GoogleFonts.poppins()),
                           subtitle: Text('Manage notification preferences', style: GoogleFonts.poppins(fontSize: 12)),
                           trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                           onTap: () {
-
                             _messengerKey.currentState?.showSnackBar(
                               SnackBar(content: Text('Notification settings coming soon', style: GoogleFonts.poppins())),
                             );
@@ -175,7 +173,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(height: 16),
                         
                         ListTile(
-                          leading: const Icon(Icons.info, color: Colors.blue),
+                          leading: const Icon(Icons.info, color: Colors.blueGrey),
                           title: Text('About', style: GoogleFonts.poppins()),
                           subtitle: Text('App version and information', style: GoogleFonts.poppins(fontSize: 12)),
                           trailing: const Icon(Icons.arrow_forward_ios, size: 16),
@@ -192,7 +190,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     const SizedBox(height: 8),
                                     Text('Computerized Maintenance Management System', style: GoogleFonts.poppins()),
                                     const SizedBox(height: 8),
-                                    Text('© 2024 Swedish Embassy', style: GoogleFonts.poppins()),
+                                    Text('© 2025 Swedish Embassy', style: GoogleFonts.poppins()),
                                   ],
                                 ),
                                 actions: [
@@ -209,12 +207,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const Divider(),
                         
                         ListTile(
-                          leading: const Icon(Icons.help, color: Colors.blue),
+                          leading: const Icon(Icons.help, color: Colors.blueGrey),
                           title: Text('Help & Support', style: GoogleFonts.poppins()),
                           subtitle: Text('Get help and contact support', style: GoogleFonts.poppins(fontSize: 12)),
                           trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                           onTap: () {
-
                             _messengerKey.currentState?.showSnackBar(
                               SnackBar(content: Text('Help & Support coming soon', style: GoogleFonts.poppins())),
                             );
