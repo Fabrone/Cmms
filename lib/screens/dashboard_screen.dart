@@ -81,16 +81,20 @@ class DashboardScreenState extends State<DashboardScreen> {
     if (mounted) {
       setState(() {
         _isDeveloper = developerDoc.exists;
+        
         if (adminDoc.exists) {
           _currentRole = 'Admin';
           _organization = adminDoc.data()?['organization'] ?? '-';
         } else if (developerDoc.exists) {
-          _currentRole = 'Developer';
-          _organization = technicianDoc.exists && technicianDoc.data()?['organization'] != null
-              ? technicianDoc.data()!['organization']
-              : '-';
-        } else if (technicianDoc.exists || (userDoc.exists && userDoc.data()?['role'] == 'Technician')) {
+          // Developers are treated as Technicians under JV Almacis
           _currentRole = 'Technician';
+          _organization = 'JV Almacis';
+        } else if (technicianDoc.exists) {
+          _currentRole = 'Technician';
+          _organization = technicianDoc.data()?['organization'] ?? '-';
+        } else if (userDoc.exists && userDoc.data()?['role'] == 'Technician') {
+          _currentRole = 'Technician';
+          // Check if they have a technician document for organization
           _organization = technicianDoc.exists && technicianDoc.data()?['organization'] != null
               ? technicianDoc.data()!['organization']
               : '-';
@@ -98,8 +102,9 @@ class DashboardScreenState extends State<DashboardScreen> {
           _currentRole = 'User';
           _organization = '-';
         }
+        
         logger.i(
-          'Initial role set: $_currentRole, Organization: $_organization, TechnicianDoc: ${technicianDoc.exists}, UserRole: ${userDoc.exists ? (userDoc.data()?['role'] ?? 'N/A') : 'N/A'}',
+          'Initial role set: $_currentRole, Organization: $_organization, IsDeveloper: $_isDeveloper, TechnicianDoc: ${technicianDoc.exists}, UserRole: ${userDoc.exists ? (userDoc.data()?['role'] ?? 'N/A') : 'N/A'}',
         );
       });
     }
@@ -117,46 +122,53 @@ class DashboardScreenState extends State<DashboardScreen> {
           .snapshots()
           .listen((snapshot) async {
         if (mounted) {
+          // Get fresh technician data for organization info
+          final technicianDoc = await FirebaseFirestore.instance
+              .collection('Technicians')
+              .doc(uid)
+              .get();
+          
           setState(() {
             if (snapshot.exists) {
-              _currentRole = collection == 'Admins'
-                  ? 'Admin'
-                  : collection == 'Developers'
-                      ? 'Developer'
-                      : 'Technician';
-              if (collection == 'Developers') {
+              if (collection == 'Admins') {
+                _currentRole = 'Admin';
+                _organization = snapshot.data()?['organization'] ?? '-';
+              } else if (collection == 'Developers') {
                 _isDeveloper = true;
-              }
-              if (collection == 'Admins' || collection == 'Technicians') {
+                _currentRole = 'Technician'; // Developers are treated as Technicians
+                _organization = 'JV Almacis'; // Developers are under JV Almacis
+              } else if (collection == 'Technicians') {
+                _currentRole = 'Technician';
                 _organization = snapshot.data()?['organization'] ?? '-';
               }
             } else {
-              _isDeveloper = collection == 'Developers' ? false : _isDeveloper;
-              if (!['Admins', 'Developers', 'Technicians']
-                  .any((coll) => coll != collection && _currentRole == (coll == 'Admins' ? 'Admin' : coll.replaceAll('s', '')))) {
-                FirebaseFirestore.instance.collection('Users').doc(uid).get().then((userDoc) {
-                  if (mounted && userDoc.exists && userDoc.data()?['role'] == 'Technician') {
-                    FirebaseFirestore.instance.collection('Technicians').doc(uid).get().then((techDoc) {
-                      if (mounted) {
-                        setState(() {
-                          _currentRole = 'Technician';
-                          _organization = techDoc.exists && techDoc.data()?['organization'] != null
-                              ? techDoc.data()!['organization']
-                              : '-';
-                        });
-                      }
-                    });
-                  } else if (mounted) {
-                    setState(() {
-                      _currentRole = 'User';
-                      _organization = '-';
-                    });
-                  }
-                  logger.i('Role after snapshot check: $_currentRole, Organization: $_organization');
-                });
+              if (collection == 'Developers') {
+                _isDeveloper = false;
+                // If no longer a developer, check if still a technician
+                if (technicianDoc.exists) {
+                  _currentRole = 'Technician';
+                  _organization = technicianDoc.data()?['organization'] ?? '-';
+                } else {
+                  // Check Users collection for technician role
+                  FirebaseFirestore.instance.collection('Users').doc(uid).get().then((userDoc) {
+                    if (mounted && userDoc.exists && userDoc.data()?['role'] == 'Technician') {
+                      setState(() {
+                        _currentRole = 'Technician';
+                        _organization = technicianDoc.exists && technicianDoc.data()?['organization'] != null
+                            ? technicianDoc.data()!['organization']
+                            : '-';
+                      });
+                    } else if (mounted) {
+                      setState(() {
+                        _currentRole = 'User';
+                        _organization = '-';
+                      });
+                    }
+                  });
+                }
               }
             }
-            logger.i('Snapshot update for $collection, Role: $_currentRole, Organization: $_organization');
+            logger.i('Snapshot update for $collection, Role: $_currentRole, Organization: $_organization, IsDeveloper: $_isDeveloper');
           });
         }
       }, onError: (e) {
@@ -167,7 +179,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     FirebaseFirestore.instance.collection('Users').doc(uid).snapshots().listen((snapshot) async {
       if (mounted && snapshot.exists) {
         final role = snapshot.data()?['role'] ?? '-';
-        if (role == 'Technician' && _currentRole != 'Admin' && _currentRole != 'Developer') {
+        if (role == 'Technician' && _currentRole != 'Admin' && !_isDeveloper) {
           final techDoc = await FirebaseFirestore.instance.collection('Technicians').doc(uid).get();
           setState(() {
             _currentRole = 'Technician';
@@ -298,7 +310,8 @@ class DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isTabletOrWeb = screenWidth > 600;
-    final displayRole = _currentRole == 'Developer' ? 'Technician' : _currentRole ?? 'User';
+    // Show "Technician" in title for both developers and technicians
+    final displayRole = _currentRole ?? 'User';
     final isFacilitySelected = _selectedFacilityId != null && _selectedFacilityId!.isNotEmpty;
 
     return PopScope(
@@ -533,7 +546,7 @@ class DashboardScreenState extends State<DashboardScreen> {
       return;
     }
 
-    final role = _currentRole == 'Developer' ? 'Technician' : _currentRole ?? 'User';
+    final role = _currentRole ?? 'User';
     if (role == 'User') {
       _messengerKey.currentState?.showSnackBar(
         SnackBar(
@@ -606,9 +619,13 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   List<Widget> _buildMenuItems() {
-    final role = _currentRole == 'Developer' ? 'Technician' : _currentRole ?? 'User';
+    final role = _currentRole ?? 'User';
     final org = _organization ?? '-';
+    
+    // Get menu items based on role and organization
     final menuItems = _roleMenuItems[role]?[org] ?? _roleMenuItems['User']!['-']!;
+
+    logger.i('Building menu items for role: $role, organization: $org, items: ${menuItems.length}');
 
     return menuItems.map((item) {
       return ListTile(

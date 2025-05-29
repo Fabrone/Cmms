@@ -133,7 +133,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                     LinearProgressIndicator(
                       value: _uploadProgress,
                       backgroundColor: Colors.grey[300],
-                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.blueGrey),
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -413,7 +413,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         return Colors.red[600]!;
       case 'doc':
       case 'docx':
-        return Colors.blue[600]!;
+        return Colors.blueGrey[600]!;
       case 'pptx':
         return Colors.orange[600]!;
       default:
@@ -457,7 +457,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       labelText: 'Category',
                       suffixIcon: _categoryController.text.isNotEmpty
                           ? IconButton(
-                              icon: const Icon(Icons.clear, color: Colors.blue),
+                              icon: const Icon(Icons.clear, color: Colors.blueGrey),
                               onPressed: () {
                                 _categoryController.clear();
                                 _updateCategorySuggestions();
@@ -471,7 +471,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.blue, width: 2),
+                        borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
                       ),
                       filled: true,
                       fillColor: Colors.grey[100],
@@ -525,7 +525,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.blue, width: 2),
+                        borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
                       ),
                       filled: true,
                       fillColor: Colors.grey[100],
@@ -545,7 +545,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.blue, width: 2),
+                        borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
                       ),
                       filled: true,
                       fillColor: Colors.grey[100],
@@ -565,7 +565,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.blue, width: 2),
+                        borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
                       ),
                       filled: true,
                       fillColor: Colors.grey[100],
@@ -594,7 +594,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                         child: ElevatedButton(
                           onPressed: _saveTask,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue,
+                            backgroundColor: Colors.blueGrey,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -630,7 +630,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
               fontWeight: FontWeight.bold,
             ),
           ),
-          backgroundColor: Colors.blue,
+          backgroundColor: Colors.blueGrey,
           iconTheme: const IconThemeData(color: Colors.white),
           leading: IconButton(
             onPressed: () => Navigator.pop(context),
@@ -661,7 +661,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                         style: GoogleFonts.poppins(color: Colors.white),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
+                        backgroundColor: Colors.blueGrey,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -731,7 +731,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                                   title: Text(
                                     fileName,
                                     style: GoogleFonts.poppins(
-                                      color: Colors.green[900],
+                                      color: Colors.blueGrey[900],
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
@@ -748,7 +748,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                                         value: 'view',
                                         child: Row(
                                           children: [
-                                            Icon(Icons.visibility, color: Colors.blue[700], size: 20),
+                                            Icon(Icons.visibility, color: Colors.blueGrey[700], size: 20),
                                             const SizedBox(width: 8),
                                             Text('View', style: GoogleFonts.poppins()),
                                           ],
@@ -765,7 +765,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                                         ),
                                       ),
                                     ],
-                                    icon: const Icon(Icons.more_vert, color: Colors.blue),
+                                    icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
                                   ),
                                 ),
                               );
@@ -781,7 +781,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         ),
         floatingActionButton: !_showScheduleForm ? FloatingActionButton.extended(
           onPressed: () => setState(() => _showScheduleForm = true),
-          backgroundColor: Colors.blue,
+          backgroundColor: Colors.blueGrey,
           icon: const Icon(Icons.add, color: Colors.white),
           label: Text(
             'Schedule New Task',
@@ -806,7 +806,7 @@ class PDFViewerScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(fileName, style: GoogleFonts.poppins(color: Colors.white)),
-        backgroundColor: Colors.blue,
+        backgroundColor: Colors.blueGrey,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: PDFView(
