@@ -2,7 +2,6 @@ import 'package:cmms/developer/developer_screen.dart';
 import 'package:cmms/display%20screens/facility_screen.dart';
 import 'package:cmms/display%20screens/price_list_screen.dart';
 import 'package:cmms/display%20screens/reports_screen.dart';
-//import 'package:cmms/display%20screens/preventive_maintenance_screen.dart';
 import 'package:cmms/display%20screens/role_assignment_screen.dart';
 import 'package:cmms/display%20screens/schedule_maintenance_screen.dart';
 import 'package:cmms/screens/building_survey_screen.dart';
@@ -11,12 +10,11 @@ import 'package:cmms/screens/drawings_screen.dart';
 import 'package:cmms/screens/equipment_supplied_screen.dart';
 import 'package:cmms/screens/inventory_screen.dart';
 import 'package:cmms/screens/kpi_screen.dart';
-//import 'package:cmms/screens/price_list_screen.dart';
-//import 'package:cmms/screens/reports_screen.dart';
 import 'package:cmms/screens/request_screen.dart';
 import 'package:cmms/screens/user_screen.dart';
 import 'package:cmms/screens/vendor_screen.dart';
 import 'package:cmms/screens/work_order_screen.dart';
+import 'package:cmms/screens/settings_screen.dart';
 import 'package:cmms/technician/preventive_maintenance_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -48,8 +46,9 @@ class DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _currentRole = widget.role == 'Unknown' ? 'User' : widget.role;
-    _selectedFacilityId = widget.facilityId.isNotEmpty ? widget.facilityId : null;
-    _isFacilitySelectionActive = _selectedFacilityId == null;
+    // Always start with no facility selected and facility selection active
+    _selectedFacilityId = null;
+    _isFacilitySelectionActive = true;
     _initializeRoleListeners();
   }
 
@@ -202,25 +201,6 @@ class DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _handleLogout() async {
-    try {
-      await FirebaseAuth.instance.signOut();
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        _messengerKey.currentState?.showSnackBar(
-          SnackBar(content: Text('Error logging out: $e', style: GoogleFonts.poppins())),
-        );
-      }
-      logger.e('Error logging out: $e');
-    }
-  }
-
   void _onFacilitySelected(String facilityId) {
     setState(() {
       _selectedFacilityId = facilityId;
@@ -246,15 +226,19 @@ class DashboardScreenState extends State<DashboardScreen> {
     'Admin': {
       'Embassy': [
         {'title': 'Building Survey', 'icon': Icons.account_balance},
+        {'title': 'Documentations', 'icon': Icons.description},
+        {'title': 'Drawings', 'icon': Icons.brush},
         {'title': 'Schedule Maintenance', 'icon': Icons.event},
+        {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
         {'title': 'Requests', 'icon': Icons.request_page},
         {'title': 'Work Orders', 'icon': Icons.work},
+        {'title': 'Settings', 'icon': Icons.settings},
       ],
       'JV Almacis': [
         {'title': 'Building Survey', 'icon': Icons.account_balance},
         {'title': 'Documentations', 'icon': Icons.description},
         {'title': 'Drawings', 'icon': Icons.brush},
-        {'title': 'Scheduled Maintenance', 'icon': Icons.event},
+        {'title': 'Schedule Maintenance', 'icon': Icons.event},
         {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
         {'title': 'Reports', 'icon': Icons.bar_chart},
         {'title': 'Price List', 'icon': Icons.attach_money},
@@ -265,37 +249,39 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Vendors', 'icon': Icons.store},
         {'title': 'Users', 'icon': Icons.group},
         {'title': 'KPIs', 'icon': Icons.trending_up},
+        {'title': 'Settings', 'icon': Icons.settings},
       ],
     },
     'Technician': {
       'Embassy': [
+        {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
+        {'title': 'Schedule Maintenance', 'icon': Icons.event},
         {'title': 'Building Survey', 'icon': Icons.account_balance},
         {'title': 'Documentations', 'icon': Icons.description},
         {'title': 'Drawings', 'icon': Icons.brush},
-        {'title': 'Scheduled Maintenance', 'icon': Icons.event},
-        {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
         {'title': 'Reports', 'icon': Icons.bar_chart},
-        {'title': 'Price List', 'icon': Icons.attach_money},
         {'title': 'Requests', 'icon': Icons.request_page},
         {'title': 'Work Orders', 'icon': Icons.work},
+        {'title': 'Settings', 'icon': Icons.settings},
       ],
       'JV Almacis': [
+        {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
+        {'title': 'Schedule Maintenance', 'icon': Icons.event},
         {'title': 'Building Survey', 'icon': Icons.account_balance},
         {'title': 'Documentations', 'icon': Icons.description},
         {'title': 'Drawings', 'icon': Icons.brush},
-        {'title': 'Scheduled Maintenance', 'icon': Icons.event},
-        {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
         {'title': 'Reports', 'icon': Icons.bar_chart},
         {'title': 'Price List', 'icon': Icons.attach_money},
         {'title': 'Requests', 'icon': Icons.request_page},
         {'title': 'Work Orders', 'icon': Icons.work},
         {'title': 'Equipment Supplied', 'icon': Icons.construction},
         {'title': 'Inventory and Parts', 'icon': Icons.inventory},
+        {'title': 'Settings', 'icon': Icons.settings},
       ],
     },
     'User': {
       '-': [
-        {'title': 'Scheduled Maintenance', 'icon': Icons.event},
+        {'title': 'Schedule Maintenance', 'icon': Icons.event},
         {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
         {'title': 'Reports', 'icon': Icons.bar_chart},
         {'title': 'Price List', 'icon': Icons.attach_money},
@@ -303,6 +289,7 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Work Orders', 'icon': Icons.work},
         {'title': 'Equipment Supplied', 'icon': Icons.construction},
         {'title': 'Inventory and Parts', 'icon': Icons.inventory},
+        {'title': 'Settings', 'icon': Icons.settings},
       ],
     },
   };
@@ -314,34 +301,36 @@ class DashboardScreenState extends State<DashboardScreen> {
     final displayRole = _currentRole == 'Developer' ? 'Technician' : _currentRole ?? 'User';
     final isFacilitySelected = _selectedFacilityId != null && _selectedFacilityId!.isNotEmpty;
 
-    return ScaffoldMessenger(
-      key: _messengerKey,
-      child: PopScope(
-        canPop: !isFacilitySelected,
-        onPopInvokedWithResult: (didPop, result) {
-          if (!didPop && isFacilitySelected) {
-            _resetFacilitySelection();
-          }
-        },
+    return PopScope(
+      canPop: !isFacilitySelected,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && isFacilitySelected) {
+          _resetFacilitySelection();
+        }
+      },
+      child: ScaffoldMessenger(
+        key: _messengerKey,
         child: Scaffold(
+          extendBodyBehindAppBar: false,
           appBar: PreferredSize(
             preferredSize: const Size.fromHeight(80.0),
             child: AppBar(
+              // Hide menu button when no facility is selected
               leading: isTabletOrWeb || !isFacilitySelected
                   ? null
                   : Builder(
                       builder: (context) => IconButton(
                         icon: const Icon(Icons.menu, color: Colors.white, size: 40),
-                        onPressed: isFacilitySelected
-                            ? () {
-                                Scaffold.of(context).openDrawer();
-                              }
-                            : null,
-                        tooltip: isFacilitySelected ? 'Open Menu' : 'Select a facility first',
+                        onPressed: () {
+                          Scaffold.of(context).openDrawer();
+                        },
+                        tooltip: 'Open Menu',
                       ),
                     ),
               title: Text(
-                '$displayRole Dashboard${_organization != '-' ? ' ($_organization)' : ''}',
+                isFacilitySelected 
+                    ? '$displayRole Dashboard${_organization != '-' ? ' ($_organization)' : ''}'
+                    : 'Select Facility',
                 style: GoogleFonts.poppins(
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
@@ -350,7 +339,7 @@ class DashboardScreenState extends State<DashboardScreen> {
               ),
               backgroundColor: Colors.blueGrey,
               actions: [
-                if (_currentRole == 'Admin')
+                if (_currentRole == 'Admin' && isFacilitySelected)
                   Padding(
                     padding: const EdgeInsets.only(right: 8.0),
                     child: IconButton(
@@ -364,17 +353,15 @@ class DashboardScreenState extends State<DashboardScreen> {
                       tooltip: 'Assign Technician Role',
                     ),
                   ),
-                IconButton(
-                  icon: const Icon(Icons.logout, color: Colors.white, size: 40),
-                  onPressed: _handleLogout,
-                  tooltip: 'Log Out',
-                ),
               ],
+              elevation: 0,
             ),
           ),
+          // Only show drawer when facility is selected
           drawer: isFacilitySelected ? _buildDrawer() : null,
           body: Row(
             children: [
+              // Only show sidebar when facility is selected and on tablet/web
               if (isTabletOrWeb && isFacilitySelected) _buildSidebar(),
               Expanded(
                 child: FacilityScreen(
@@ -533,6 +520,7 @@ class DashboardScreenState extends State<DashboardScreen> {
   void _handleMenuItemTap(String title) {
     if (!mounted) return;
 
+    // Ensure we have a selected facility
     if (_selectedFacilityId == null || _selectedFacilityId!.isEmpty) {
       _messengerKey.currentState?.showSnackBar(
         SnackBar(
@@ -565,6 +553,7 @@ class DashboardScreenState extends State<DashboardScreen> {
           'Building Survey': () => BuildingSurveyScreen(facilityId: _selectedFacilityId!, selectedSubSection: ''),
           'Documentations': () => DocumentationsScreen(facilityId: _selectedFacilityId!),
           'Drawings': () => DrawingsScreen(facilityId: _selectedFacilityId!),
+          'Schedule Maintenance': () => ScheduleMaintenanceScreen(facilityId: _selectedFacilityId!),
           'Scheduled Maintenance': () => ScheduleMaintenanceScreen(facilityId: _selectedFacilityId!),
           'Preventive Maintenance': () => PreventiveMaintenanceScreen(facilityId: _selectedFacilityId!),
           'Reports': () => ReportsScreen(facilityId: _selectedFacilityId!),
@@ -576,6 +565,7 @@ class DashboardScreenState extends State<DashboardScreen> {
           'Vendors': () => VendorScreen(facilityId: _selectedFacilityId!),
           'Users': () => UserScreen(facilityId: _selectedFacilityId!),
           'KPIs': () => KpiScreen(facilityId: _selectedFacilityId!),
+          'Settings': () => SettingsScreen(facilityId: _selectedFacilityId!),
         };
 
         final screenBuilder = screenMap[title];
@@ -585,13 +575,6 @@ class DashboardScreenState extends State<DashboardScreen> {
             MaterialPageRoute(builder: (context) => screenBuilder()),
           ).then((_) {
             logger.i('Successfully navigated to $title with facilityId: $_selectedFacilityId');
-            if (mounted && _messengerKey.currentState != null) {
-              _messengerKey.currentState!.showSnackBar(
-                SnackBar(
-                  content: Text('Navigation to $title successful', style: GoogleFonts.poppins()),
-                ),
-              );
-            }
           }).catchError((e) {
             logger.e('Error navigating to $title: $e');
             if (mounted && _messengerKey.currentState != null) {

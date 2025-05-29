@@ -51,19 +51,23 @@ class _FloatingNotificationWidgetState extends State<FloatingNotificationWidget>
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<GroupedNotificationModel>>(
-      stream: NotificationService().getUrgentNotifications(),
+      stream: NotificationService().getTodaysTriggeredNotifications(),
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data!.isEmpty) {
           return const SizedBox.shrink();
         }
 
         final notifications = snapshot.data!;
+        if (notifications.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        // Only show the latest notification for today
+        final latestNotification = notifications.first;
         final categories = <String>{};
         
-        for (final group in notifications) {
-          for (final notification in group.notifications) {
-            categories.add(notification.category);
-          }
+        for (final notification in latestNotification.notifications) {
+          categories.add(notification.category);
         }
 
         if (categories.isEmpty) {
@@ -91,14 +95,14 @@ class _FloatingNotificationWidgetState extends State<FloatingNotificationWidget>
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [Colors.orange[400]!, Colors.orange[600]!],
+                      colors: [Colors.blueGrey[400]!, Colors.blueGrey[600]!],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: InkWell(
-                    onTap: () => _openNotificationDetails(context, notifications),
+                    onTap: () => _openNotificationDetails(context, [latestNotification]),
                     borderRadius: BorderRadius.circular(12),
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -123,7 +127,7 @@ class _FloatingNotificationWidgetState extends State<FloatingNotificationWidget>
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  'Upcoming maintenance tasks for the following categories:',
+                                  'Maintenance tasks due today:',
                                   style: GoogleFonts.poppins(
                                     color: Colors.white,
                                     fontSize: 12,
