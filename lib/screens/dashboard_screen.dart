@@ -37,6 +37,7 @@ class DashboardScreen extends StatefulWidget {
 class DashboardScreenState extends State<DashboardScreen> {
   final logger = Logger(printer: PrettyPrinter());
   final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>(); // Added for drawer control
   String? _currentRole;
   bool _isDeveloper = false;
   String? _selectedFacilityId;
@@ -320,6 +321,15 @@ class DashboardScreenState extends State<DashboardScreen> {
       _isFacilitySelectionActive = false;
     });
     logger.i('Selected facility: $facilityId');
+    
+    // Open the drawer automatically after facility selection
+    // Use Future.delayed to ensure the state has been updated before opening the drawer
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted && _scaffoldKey.currentState != null && !_scaffoldKey.currentState!.isDrawerOpen) {
+        _scaffoldKey.currentState!.openDrawer();
+        logger.i('Automatically opened drawer after facility selection');
+      }
+    });
   }
 
   void _resetFacilitySelection() {
@@ -431,6 +441,7 @@ class DashboardScreenState extends State<DashboardScreen> {
       child: ScaffoldMessenger(
         key: _messengerKey,
         child: Scaffold(
+          key: _scaffoldKey, // Added scaffold key for drawer control
           extendBodyBehindAppBar: false,
           appBar: PreferredSize(
             preferredSize: const Size.fromHeight(80.0),
@@ -625,6 +636,15 @@ class DashboardScreenState extends State<DashboardScreen> {
           _selectedFacilityId = newFacilityId;
           _isFacilitySelectionActive = false;
         });
+        
+        // Automatically open drawer after adding a new facility
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted && _scaffoldKey.currentState != null && !_scaffoldKey.currentState!.isDrawerOpen) {
+            _scaffoldKey.currentState!.openDrawer();
+            logger.i('Automatically opened drawer after adding new facility');
+          }
+        });
+        
         messengerState?.showSnackBar(
           SnackBar(content: Text('Facility added successfully', style: GoogleFonts.poppins())),
         );
