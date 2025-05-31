@@ -89,7 +89,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             elevation: 0,
           ),
-          body: Padding(
+          body: SingleChildScrollView(  // Changed from Padding to SingleChildScrollView for scrollability
             padding: const EdgeInsets.all(16.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -222,7 +222,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 
-                const Spacer(),
+                const SizedBox(height: 24),  // Changed from Spacer() to fixed height
                 
                 // Logout Section
                 Card(

@@ -1,22 +1,20 @@
 import 'package:cmms/developer/developer_screen.dart';
+import 'package:cmms/display%20screens/billing_screen.dart';
 import 'package:cmms/display%20screens/building_survey_screen.dart';
 import 'package:cmms/display%20screens/documentations_screen.dart';
 import 'package:cmms/display%20screens/drawings_screen.dart';
 import 'package:cmms/display%20screens/facility_screen.dart';
 import 'package:cmms/display%20screens/price_list_screen.dart';
 import 'package:cmms/display%20screens/reports_screen.dart';
+import 'package:cmms/display%20screens/request_screen.dart';
 import 'package:cmms/display%20screens/role_assignment_screen.dart';
 import 'package:cmms/display%20screens/schedule_maintenance_screen.dart';
-//import 'package:cmms/screens/building_survey_screen.dart';
-//import 'package:cmms/screens/documentations_screen.dart';
-//import 'package:cmms/screens/drawings_screen.dart';
+import 'package:cmms/display%20screens/work_order_screen.dart';
 import 'package:cmms/screens/equipment_supplied_screen.dart';
 import 'package:cmms/screens/inventory_screen.dart';
 import 'package:cmms/screens/kpi_screen.dart';
-import 'package:cmms/screens/request_screen.dart';
 import 'package:cmms/screens/user_screen.dart';
 import 'package:cmms/screens/vendor_screen.dart';
-import 'package:cmms/screens/work_order_screen.dart';
 import 'package:cmms/screens/settings_screen.dart';
 import 'package:cmms/technician/preventive_maintenance_screen.dart';
 import 'package:flutter/material.dart';
@@ -64,55 +62,82 @@ class DashboardScreenState extends State<DashboardScreen> {
 
     logger.i('Initializing role for UID: ${user.uid}');
 
-    final developerDoc = await FirebaseFirestore.instance
-        .collection('Developers')
-        .doc(user.uid)
-        .get();
-    final adminDoc = await FirebaseFirestore.instance
-        .collection('Admins')
-        .doc(user.uid)
-        .get();
-    final technicianDoc = await FirebaseFirestore.instance
-        .collection('Technicians')
-        .doc(user.uid)
-        .get();
-    final userDoc = await FirebaseFirestore.instance
-        .collection('Users')
-        .doc(user.uid)
-        .get();
+    try {
+      // Check collections in order of priority
+      final adminDoc = await FirebaseFirestore.instance
+          .collection('Admins')
+          .doc(user.uid)
+          .get();
+      
+      final developerDoc = await FirebaseFirestore.instance
+          .collection('Developers')
+          .doc(user.uid)
+          .get();
+      
+      final technicianDoc = await FirebaseFirestore.instance
+          .collection('Technicians')
+          .doc(user.uid)
+          .get();
+      
+      final userDoc = await FirebaseFirestore.instance
+          .collection('Users')
+          .doc(user.uid)
+          .get();
 
-    if (mounted) {
-      setState(() {
-        _isDeveloper = developerDoc.exists;
-        
-        if (adminDoc.exists) {
-          _currentRole = 'Admin';
-          _organization = adminDoc.data()?['organization'] ?? '-';
-        } else if (developerDoc.exists) {
-          // Developers are treated as Technicians under JV Almacis
-          _currentRole = 'Technician';
-          _organization = 'JV Almacis';
-        } else if (technicianDoc.exists) {
-          _currentRole = 'Technician';
-          _organization = technicianDoc.data()?['organization'] ?? '-';
-        } else if (userDoc.exists && userDoc.data()?['role'] == 'Technician') {
-          _currentRole = 'Technician';
-          // Check if they have a technician document for organization
-          _organization = technicianDoc.exists && technicianDoc.data()?['organization'] != null
-              ? technicianDoc.data()!['organization']
-              : '-';
-        } else {
+      if (mounted) {
+        setState(() {
+          _isDeveloper = developerDoc.exists;
+          
+          // Check admin first - highest priority
+          if (adminDoc.exists) {
+            _currentRole = 'Admin';
+            _organization = adminDoc.data()?['organization'] ?? '-';
+            logger.i('User is an Admin with organization: $_organization');
+          } 
+          // Then check developer
+          else if (developerDoc.exists) {
+            _currentRole = 'Technician'; // Developers are treated as Technicians
+            _organization = 'JV Almacis'; // Developers are under JV Almacis
+            logger.i('User is a Developer treated as Technician for JV Almacis');
+          } 
+          // Then check technician
+          else if (technicianDoc.exists) {
+            _currentRole = 'Technician';
+            _organization = technicianDoc.data()?['organization'] ?? '-';
+            logger.i('User is a Technician with organization: $_organization');
+          } 
+          // Finally check user collection for technician role
+          else if (userDoc.exists && userDoc.data()?['role'] == 'Technician') {
+            _currentRole = 'Technician';
+            // Check if they have a technician document for organization
+            _organization = technicianDoc.exists && technicianDoc.data()?['organization'] != null
+                ? technicianDoc.data()!['organization']
+                : '-';
+            logger.i('User has Technician role in Users collection with organization: $_organization');
+          } 
+          // Default to User
+          else {
+            _currentRole = 'User';
+            _organization = '-';
+            logger.i('User has default User role');
+          }
+          
+          logger.i(
+            'Initial role set: $_currentRole, Organization: $_organization, IsDeveloper: $_isDeveloper, TechnicianDoc: ${technicianDoc.exists}, UserRole: ${userDoc.exists ? (userDoc.data()?['role'] ?? 'N/A') : 'N/A'}',
+          );
+        });
+      }
+
+      _listenToRoleChanges(user.uid);
+    } catch (e) {
+      logger.e('Error initializing role: $e');
+      if (mounted) {
+        setState(() {
           _currentRole = 'User';
           _organization = '-';
-        }
-        
-        logger.i(
-          'Initial role set: $_currentRole, Organization: $_organization, IsDeveloper: $_isDeveloper, TechnicianDoc: ${technicianDoc.exists}, UserRole: ${userDoc.exists ? (userDoc.data()?['role'] ?? 'N/A') : 'N/A'}',
-        );
-      });
+        });
+      }
     }
-
-    _listenToRoleChanges(user.uid);
   }
 
   void _listenToRoleChanges(String uid) {
@@ -136,22 +161,29 @@ class DashboardScreenState extends State<DashboardScreen> {
               if (collection == 'Admins') {
                 _currentRole = 'Admin';
                 _organization = snapshot.data()?['organization'] ?? '-';
+                logger.i('Role updated to Admin with organization: $_organization');
               } else if (collection == 'Developers') {
                 _isDeveloper = true;
                 _currentRole = 'Technician'; // Developers are treated as Technicians
                 _organization = 'JV Almacis'; // Developers are under JV Almacis
+                logger.i('Role updated to Developer (treated as Technician) for JV Almacis');
               } else if (collection == 'Technicians') {
-                _currentRole = 'Technician';
-                _organization = snapshot.data()?['organization'] ?? '-';
+                // Only update to Technician if not already an Admin
+                if (_currentRole != 'Admin') {
+                  _currentRole = 'Technician';
+                  _organization = snapshot.data()?['organization'] ?? '-';
+                  logger.i('Role updated to Technician with organization: $_organization');
+                }
               }
             } else {
               if (collection == 'Developers') {
                 _isDeveloper = false;
-                // If no longer a developer, check if still a technician
-                if (technicianDoc.exists) {
+                // If no longer a developer, check if still a technician or admin
+                if (_currentRole != 'Admin' && technicianDoc.exists) {
                   _currentRole = 'Technician';
                   _organization = technicianDoc.data()?['organization'] ?? '-';
-                } else {
+                  logger.i('No longer a Developer, but still a Technician with organization: $_organization');
+                } else if (_currentRole != 'Admin') {
                   // Check Users collection for technician role
                   FirebaseFirestore.instance.collection('Users').doc(uid).get().then((userDoc) {
                     if (mounted && userDoc.exists && userDoc.data()?['role'] == 'Technician') {
@@ -160,15 +192,38 @@ class DashboardScreenState extends State<DashboardScreen> {
                         _organization = technicianDoc.exists && technicianDoc.data()?['organization'] != null
                             ? technicianDoc.data()!['organization']
                             : '-';
+                        logger.i('Role updated to Technician from Users collection with organization: $_organization');
                       });
-                    } else if (mounted) {
+                    } else if (mounted && _currentRole != 'Admin') {
                       setState(() {
                         _currentRole = 'User';
                         _organization = '-';
+                        logger.i('Role updated to default User');
                       });
                     }
                   });
                 }
+              } else if (collection == 'Admins' && _currentRole == 'Admin') {
+                // If admin document was deleted, check other roles
+                _checkRolePriority(uid);
+                logger.i('Admin document removed, checking other roles');
+              } else if (collection == 'Technicians' && _currentRole == 'Technician' && !_isDeveloper) {
+                // If technician document was deleted and not a developer, check user role
+                FirebaseFirestore.instance.collection('Users').doc(uid).get().then((userDoc) {
+                  if (mounted && userDoc.exists && userDoc.data()?['role'] == 'Technician') {
+                    setState(() {
+                      _currentRole = 'Technician';
+                      _organization = '-';
+                      logger.i('Technician document removed but still has Technician role in Users');
+                    });
+                  } else if (mounted) {
+                    setState(() {
+                      _currentRole = 'User';
+                      _organization = '-';
+                      logger.i('Technician document removed, role updated to User');
+                    });
+                  }
+                });
               }
             }
             logger.i('Snapshot update for $collection, Role: $_currentRole, Organization: $_organization, IsDeveloper: $_isDeveloper');
@@ -204,6 +259,49 @@ class DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
+  // Helper method to check role priority when a role document is removed
+  Future<void> _checkRolePriority(String uid) async {
+    if (!mounted) return;
+    
+    try {
+      final developerDoc = await FirebaseFirestore.instance
+          .collection('Developers')
+          .doc(uid)
+          .get();
+      
+      final technicianDoc = await FirebaseFirestore.instance
+          .collection('Technicians')
+          .doc(uid)
+          .get();
+      
+      final userDoc = await FirebaseFirestore.instance
+          .collection('Users')
+          .doc(uid)
+          .get();
+      
+      if (mounted) {
+        setState(() {
+          if (developerDoc.exists) {
+            _isDeveloper = true;
+            _currentRole = 'Technician';
+            _organization = 'JV Almacis';
+          } else if (technicianDoc.exists) {
+            _currentRole = 'Technician';
+            _organization = technicianDoc.data()?['organization'] ?? '-';
+          } else if (userDoc.exists && userDoc.data()?['role'] == 'Technician') {
+            _currentRole = 'Technician';
+            _organization = '-';
+          } else {
+            _currentRole = 'User';
+            _organization = '-';
+          }
+        });
+      }
+    } catch (e) {
+      logger.e('Error checking role priority: $e');
+    }
+  }
+
   Future<void> _redirectToLogin(String message) async {
     if (mounted) {
       Navigator.pushReplacement(
@@ -237,6 +335,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     super.dispose();
   }
 
+  // Updated menu items with Settings as the last item
   final Map<String, Map<String, List<Map<String, dynamic>>>> _roleMenuItems = {
     'Admin': {
       'Embassy': [
@@ -247,7 +346,8 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
         {'title': 'Requests', 'icon': Icons.request_page},
         {'title': 'Work Orders', 'icon': Icons.work},
-        {'title': 'Settings', 'icon': Icons.settings},
+        {'title': 'Billing', 'icon': Icons.receipt_long},
+        {'title': 'Settings', 'icon': Icons.settings}, // Settings moved to last
       ],
       'JV Almacis': [
         {'title': 'Building Survey', 'icon': Icons.account_balance},
@@ -264,7 +364,8 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Vendors', 'icon': Icons.store},
         {'title': 'Users', 'icon': Icons.group},
         {'title': 'KPIs', 'icon': Icons.trending_up},
-        {'title': 'Settings', 'icon': Icons.settings},
+        {'title': 'Billing', 'icon': Icons.receipt_long},
+        {'title': 'Settings', 'icon': Icons.settings}, // Settings moved to last
       ],
     },
     'Technician': {
@@ -277,7 +378,8 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Reports', 'icon': Icons.bar_chart},
         {'title': 'Requests', 'icon': Icons.request_page},
         {'title': 'Work Orders', 'icon': Icons.work},
-        {'title': 'Settings', 'icon': Icons.settings},
+        {'title': 'Billing', 'icon': Icons.receipt_long},
+        {'title': 'Settings', 'icon': Icons.settings}, // Settings moved to last
       ],
       'JV Almacis': [
         {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
@@ -291,7 +393,8 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Work Orders', 'icon': Icons.work},
         {'title': 'Equipment Supplied', 'icon': Icons.construction},
         {'title': 'Inventory and Parts', 'icon': Icons.inventory},
-        {'title': 'Settings', 'icon': Icons.settings},
+        {'title': 'Billing', 'icon': Icons.receipt_long},
+        {'title': 'Settings', 'icon': Icons.settings}, // Settings moved to last
       ],
     },
     'User': {
@@ -304,7 +407,8 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Work Orders', 'icon': Icons.work},
         {'title': 'Equipment Supplied', 'icon': Icons.construction},
         {'title': 'Inventory and Parts', 'icon': Icons.inventory},
-        {'title': 'Settings', 'icon': Icons.settings},
+        {'title': 'Billing', 'icon': Icons.receipt_long},
+        {'title': 'Settings', 'icon': Icons.settings}, // Settings moved to last
       ],
     },
   };
@@ -582,6 +686,7 @@ class DashboardScreenState extends State<DashboardScreen> {
           'Users': () => UserScreen(facilityId: _selectedFacilityId!),
           'KPIs': () => KpiScreen(facilityId: _selectedFacilityId!),
           'Settings': () => SettingsScreen(facilityId: _selectedFacilityId!),
+          'Billing': () => BillingScreen(facilityId: _selectedFacilityId!, userRole: _currentRole ?? 'User'),
         };
 
         final screenBuilder = screenMap[title];
