@@ -10,6 +10,7 @@ import 'package:cmms/models/notification_model.dart';
 import 'package:cmms/models/maintenance_task_model.dart';
 import 'package:cmms/developer/notification_setup_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart' show kIsWeb; 
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -87,27 +88,74 @@ class NotificationService {
         ?.createNotificationChannel(androidChannel);
   }
 
+  // UPDATED METHOD - This is the key fix for your web issue
   Future<void> _initializeFCM() async {
-    final token = await _messaging.getToken();
-    _logger.i('FCM Token: $token');
-
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null && token != null) {
-      await _firestore.collection('Users').doc(user.uid).set({
-        'fcmToken': token,
-        'lastTokenUpdate': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }
-
-    _messaging.onTokenRefresh.listen((newToken) async {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        await _firestore.collection('Users').doc(user.uid).update({
-          'fcmToken': newToken,
-          'lastTokenUpdate': FieldValue.serverTimestamp(),
-        });
+    try {
+      String? token;
+      
+      if (kIsWeb) {
+        // For web platform, handle VAPID key and permission checking
+        try {
+          const vapidKey = 'BJr44Q87YwuvqcYpKTyV_fMt3lvtUSHtOr60R2U5vpnLHx8YZLf84m8DqQB_YNoRt_v1CuYHzbnyUt9-z99TzS4'; 
+          
+          // Check if VAPID key is configured
+          if (vapidKey != 'BJr44Q87YwuvqcYpKTyV_fMt3lvtUSHtOr60R2U5vpnLHx8YZLf84m8DqQB_YNoRt_v1CuYHzbnyUt9-z99TzS4' && vapidKey.isNotEmpty) {
+            token = await _messaging.getToken(vapidKey: vapidKey);
+          } else {
+            // Try without VAPID key (may work in some cases)
+            token = await _messaging.getToken();
+          }
+        } catch (e) {
+          _logger.w('Failed to get FCM token for web: $e');
+          // Continue execution without token - app should still work
+          token = null;
+        }
+      } else {
+        // For mobile platforms (Android/iOS)
+        try {
+          token = await _messaging.getToken();
+        } catch (e) {
+          _logger.w('Failed to get FCM token for mobile: $e');
+          token = null;
+        }
       }
-    });
+      
+      if (token != null) {
+        _logger.i('FCM Token: $token');
+        
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          await _firestore.collection('Users').doc(user.uid).set({
+            'fcmToken': token,
+            'lastTokenUpdate': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+      } else {
+        _logger.w('FCM Token is null - notifications may not work properly');
+      }
+
+      // Set up token refresh listener with error handling
+      _messaging.onTokenRefresh.listen((newToken) async {
+        _logger.i('FCM token refreshed: $newToken');
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          try {
+            await _firestore.collection('Users').doc(user.uid).update({
+              'fcmToken': newToken,
+              'lastTokenUpdate': FieldValue.serverTimestamp(),
+            });
+          } catch (e) {
+            _logger.e('Error updating refreshed token: $e');
+          }
+        }
+      }).onError((error) {
+        _logger.e('Error in token refresh listener: $error');
+      });
+      
+    } catch (e) {
+      _logger.e('Error in FCM initialization: $e');
+      // Don't rethrow - let the app continue without FCM
+    }
   }
 
   Future<void> _setupNotificationListeners() async {
