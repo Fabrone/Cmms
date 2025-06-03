@@ -1,125 +1,134 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
 import 'package:uuid/uuid.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:cmms/models/request.dart';
+import 'package:cmms/models/equipment.dart';
 import 'dart:io';
 
-class RequestScreen extends StatefulWidget {
+class EquipmentSuppliedScreen extends StatefulWidget {
   final String facilityId;
 
-  const RequestScreen({super.key, required this.facilityId});
+  const EquipmentSuppliedScreen({super.key, required this.facilityId});
 
   @override
-  State<RequestScreen> createState() => _RequestScreenState();
+  State<EquipmentSuppliedScreen> createState() => _EquipmentSuppliedScreenState();
 }
 
-class _RequestScreenState extends State<RequestScreen> {
+class _EquipmentSuppliedScreenState extends State<EquipmentSuppliedScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _titleController = TextEditingController();
-  final _descriptionController = TextEditingController();
-  final _commentController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _typeController = TextEditingController();
+  final _serialController = TextEditingController();
+  final _locationController = TextEditingController();
+  final _purchasePriceController = TextEditingController();
+  final _warrantyController = TextEditingController();
+  final _notesController = TextEditingController();
   final Logger _logger = Logger();
   final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
-  String _selectedStatus = 'All';
-  String _priority = 'Medium';
+  
+  String _status = 'Active';
+  String _statusFilter = 'All';
+  String _typeFilter = 'All';
   final List<Map<String, String>> _attachmentUrls = [];
   bool _showForm = false;
 
   @override
   void initState() {
     super.initState();
-    _logger.i('RequestScreen initialized: facilityId=${widget.facilityId}');
+    _logger.i('EquipmentSuppliedScreen initialized: facilityId=${widget.facilityId}');
   }
 
-  Future<void> _submitRequest() async {
+  Future<void> _addEquipment() async {
     if (_formKey.currentState!.validate()) {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        _logger.e('No user signed in');
-        _showSnackBar('Please sign in to submit requests');
+        _showSnackBar('Please sign in to add equipment');
         return;
       }
+
       try {
-        _logger.i('Submitting request: title=${_titleController.text}, facilityId=${widget.facilityId}');
-        final requestId = const Uuid().v4();
+        final equipmentId = const Uuid().v4();
+        _logger.i('Adding equipment: equipmentId=$equipmentId, name=${_nameController.text}');
         
-        final request = Request(
-          id: requestId,
-          requestId: requestId,
-          title: _titleController.text.trim(),
-          description: _descriptionController.text.trim(),
-          status: 'Open',
-          priority: _priority,
-          createdAt: DateTime.now(),
-          createdBy: user.uid,
-          createdByEmail: user.email,
+        final equipment = Equipment(
+          id: equipmentId,
+          equipmentId: equipmentId,
+          name: _nameController.text.trim(),
+          type: _typeController.text.trim(),
+          serialNumber: _serialController.text.trim(),
+          locationId: _locationController.text.trim(),
+          purchasePrice: double.tryParse(_purchasePriceController.text) ?? 0.0,
+          purchaseDate: DateTime.now(),
+          warrantyMonths: int.tryParse(_warrantyController.text) ?? 0,
+          status: _status,
+          notes: _notesController.text.trim(),
           attachments: _attachmentUrls,
-          comments: _commentController.text.isNotEmpty
-              ? [
-                  {
-                    'text': _commentController.text.trim(),
-                    'by': user.email ?? 'Unknown',
-                    'timestamp': Timestamp.now(),
-                  }
-                ]
-              : [],
-          workOrderIds: [],
-          clientStatus: 'Pending',
+          maintenanceHistory: [
+            {
+              'action': 'Equipment Created',
+              'timestamp': Timestamp.now(),
+              'notes': _notesController.text.trim(),
+              'userId': user.uid,
+            }
+          ],
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          createdBy: user.uid,
         );
 
         await FirebaseFirestore.instance
             .collection('facilities')
             .doc(widget.facilityId)
-            .collection('requests')
-            .doc(requestId)
-            .set(request.toMap());
+            .collection('equipment')
+            .doc(equipmentId)
+            .set(equipment.toMap());
 
-        _titleController.clear();
-        _descriptionController.clear();
-        _commentController.clear();
         setState(() {
           _attachmentUrls.clear();
           _showForm = false;
         });
-        _showSnackBar('Request submitted successfully');
+        _clearForm();
+        _showSnackBar('Equipment added successfully');
       } catch (e) {
-        _logger.e('Error submitting request: $e');
-        _showSnackBar('Error submitting request: $e');
+        _logger.e('Error adding equipment: $e');
+        _showSnackBar('Error adding equipment: $e');
       }
     }
   }
 
   Future<void> _uploadAttachment() async {
     try {
-      _logger.i('Picking attachment file, platform: ${kIsWeb ? "web" : "non-web"}');
+      _logger.i('Picking attachment file');
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'jpg', 'png', 'docx'],
       );
+      
       if (result == null || result.files.isEmpty) {
-        _logger.w('No file selected');
         _showSnackBar('No file selected');
         return;
       }
 
       final file = result.files.first;
-      _logger.i('Uploading attachment: ${file.name}, bytes: ${file.bytes != null}');
+      if (!['pdf', 'jpg', 'png', 'docx'].contains(file.extension)) {
+        _showSnackBar('Please select a PDF, JPG, PNG, or DOCX file');
+        return;
+      }
+
       final fileName = '${const Uuid().v4()}_${file.name}';
       final storageRef = FirebaseStorage.instance
           .ref()
-          .child('requests/${widget.facilityId}/$fileName');
+          .child('equipment/${widget.facilityId}/$fileName');
 
       String url;
       if (kIsWeb) {
         if (file.bytes == null) {
-          _logger.e('No bytes available for web upload');
           _showSnackBar('File data unavailable');
           return;
         }
@@ -127,7 +136,6 @@ class _RequestScreenState extends State<RequestScreen> {
         url = await uploadTask.ref.getDownloadURL();
       } else {
         if (file.path == null) {
-          _logger.e('No path available for non-web upload');
           _showSnackBar('File path unavailable');
           return;
         }
@@ -135,51 +143,51 @@ class _RequestScreenState extends State<RequestScreen> {
         url = await uploadTask.ref.getDownloadURL();
       }
 
-      _logger.i('Attachment uploaded successfully: $url');
       setState(() {
         _attachmentUrls.add({'name': file.name, 'url': url});
       });
-      _showSnackBar('Attachment uploaded');
+      _showSnackBar('Attachment uploaded successfully');
     } catch (e) {
       _logger.e('Error uploading attachment: $e');
       _showSnackBar('Error uploading attachment: $e');
     }
   }
 
-  Future<void> _updateRequest(String docId, String newStatus, String comment) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      _logger.e('No user signed in');
-      _showSnackBar('Please sign in to update requests');
-      return;
-    }
+  Future<void> _updateStatus(String docId, String newStatus, String notes) async {
     try {
-      _logger.i('Updating request: docId=$docId, newStatus=$newStatus, facilityId=${widget.facilityId}');
-      final updates = {
-        'status': newStatus,
-        'updatedAt': Timestamp.now(),
-      };
-      if (comment.isNotEmpty) {
-        updates['comments'] = FieldValue.arrayUnion([
-          {
-            'text': comment.trim(),
-            'by': user.email ?? 'Unknown',
-            'timestamp': Timestamp.now(),
-          }
-        ]);
-      }
+      _logger.i('Updating status: docId=$docId, newStatus=$newStatus');
       await FirebaseFirestore.instance
           .collection('facilities')
           .doc(widget.facilityId)
-          .collection('requests')
+          .collection('equipment')
           .doc(docId)
-          .update(updates);
-      _logger.i('Request status updated successfully');
-      _showSnackBar('Request status updated to $newStatus');
+          .update({
+        'status': newStatus,
+        'updatedAt': Timestamp.now(),
+        'maintenanceHistory': FieldValue.arrayUnion([
+          {
+            'action': 'Status changed to $newStatus',
+            'timestamp': Timestamp.now(),
+            'notes': notes,
+            'userId': FirebaseAuth.instance.currentUser?.uid ?? 'unknown',
+          }
+        ]),
+      });
+      _showSnackBar('Status updated to $newStatus');
     } catch (e) {
-      _logger.e('Error updating request: $e');
-      _showSnackBar('Error updating request: $e');
+      _logger.e('Error updating status: $e');
+      _showSnackBar('Error updating status: $e');
     }
+  }
+
+  void _clearForm() {
+    _nameController.clear();
+    _typeController.clear();
+    _serialController.clear();
+    _locationController.clear();
+    _purchasePriceController.clear();
+    _warrantyController.clear();
+    _notesController.clear();
   }
 
   void _showSnackBar(String message) {
@@ -192,9 +200,13 @@ class _RequestScreenState extends State<RequestScreen> {
 
   @override
   void dispose() {
-    _titleController.dispose();
-    _descriptionController.dispose();
-    _commentController.dispose();
+    _nameController.dispose();
+    _typeController.dispose();
+    _serialController.dispose();
+    _locationController.dispose();
+    _purchasePriceController.dispose();
+    _warrantyController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
@@ -211,7 +223,7 @@ class _RequestScreenState extends State<RequestScreen> {
         child: Scaffold(
           appBar: AppBar(
             title: Text(
-              'Maintenance Requests',
+              'Equipment Supplied',
               style: GoogleFonts.poppins(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -234,58 +246,90 @@ class _RequestScreenState extends State<RequestScreen> {
                   color: Colors.grey[100],
                   child: Row(
                     children: [
-                      Text(
-                        'Filter by Status:',
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w500,
-                          color: Colors.blueGrey[800],
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Text(
+                              'Status:',
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w500,
+                                color: Colors.blueGrey[800],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: DropdownButtonFormField<String>(
+                                value: _statusFilter,
+                                items: ['All', 'Active', 'Inactive', 'Under Repair', 'Decommissioned']
+                                    .map((s) => DropdownMenuItem(
+                                          value: s,
+                                          child: Text(s, style: GoogleFonts.poppins(color: Colors.blueGrey[800])),
+                                        ))
+                                    .toList(),
+                                onChanged: (value) => setState(() => _statusFilter = value!),
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: BorderSide(color: Colors.blueGrey[300]!),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                ),
+                                style: GoogleFonts.poppins(color: Colors.blueGrey[800], fontWeight: FontWeight.w500),
+                                dropdownColor: Colors.white,
+                                icon: Icon(Icons.arrow_drop_down, color: Colors.blueGrey[800]),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 16),
                       Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _selectedStatus,
-                          items: ['All', 'Open', 'In Progress', 'Closed']
-                              .map((s) => DropdownMenuItem(
-                                    value: s,
-                                    child: Text(s, style: GoogleFonts.poppins(color: Colors.blueGrey[800], fontWeight: FontWeight.w500)),
-                                  ))
-                              .toList(),
-                          onChanged: (value) => setState(() => _selectedStatus = value!),
-                          decoration: InputDecoration(
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.blueGrey[300]!),
+                        child: Row(
+                          children: [
+                            Text(
+                              'Type:',
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w500,
+                                color: Colors.blueGrey[800],
+                              ),
                             ),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            filled: true,
-                            fillColor: Colors.white,
-                          ),
-                          style: GoogleFonts.poppins(color: Colors.blueGrey[800], fontWeight: FontWeight.w500),
-                          dropdownColor: Colors.white,
-                          icon: Icon(Icons.arrow_drop_down, color: Colors.blueGrey[800]),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: DropdownButtonFormField<String>(
+                                value: _typeFilter,
+                                items: ['All', 'Electrical', 'Mechanical', 'HVAC', 'Plumbing', 'Safety', 'IT Equipment']
+                                    .map((t) => DropdownMenuItem(
+                                          value: t,
+                                          child: Text(t, style: GoogleFonts.poppins(color: Colors.blueGrey[800])),
+                                        ))
+                                    .toList(),
+                                onChanged: (value) => setState(() => _typeFilter = value!),
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: BorderSide(color: Colors.blueGrey[300]!),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                ),
+                                style: GoogleFonts.poppins(color: Colors.blueGrey[800], fontWeight: FontWeight.w500),
+                                dropdownColor: Colors.white,
+                                icon: Icon(Icons.arrow_drop_down, color: Colors.blueGrey[800]),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-                // Requests List
+                // Equipment List
                 Expanded(
                   child: StreamBuilder<QuerySnapshot>(
-                    stream: _selectedStatus == 'All'
-                        ? FirebaseFirestore.instance
-                            .collection('facilities')
-                            .doc(widget.facilityId)
-                            .collection('requests')
-                            .orderBy('createdAt', descending: true)
-                            .snapshots()
-                        : FirebaseFirestore.instance
-                            .collection('facilities')
-                            .doc(widget.facilityId)
-                            .collection('requests')
-                            .where('status', isEqualTo: _selectedStatus)
-                            .orderBy('createdAt', descending: true)
-                            .snapshots(),
+                    stream: _buildEquipmentStream(),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
@@ -306,38 +350,16 @@ class _RequestScreenState extends State<RequestScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
-                                Icons.request_page_outlined,
+                                Icons.precision_manufacturing_outlined,
                                 size: 64,
                                 color: Colors.grey[400],
                               ),
                               const SizedBox(height: 16),
                               Text(
-                                'No requests found',
+                                'No equipment found',
                                 style: GoogleFonts.poppins(
                                   fontSize: 18,
                                   color: Colors.grey[600],
-                                ),
-                              ),
-                              if (_selectedStatus != 'All')
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 8.0),
-                                  child: Text(
-                                    'Try changing the filter option',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 14,
-                                      color: Colors.grey[500],
-                                    ),
-                                  ),
-                                ),
-                              Padding(
-                                padding: const EdgeInsets.only(top: 16.0),
-                                child: Text(
-                                  'Create a new request using the button below',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 14,
-                                    color: Colors.blueGrey[600],
-                                    fontWeight: FontWeight.w500,
-                                  ),
                                 ),
                               ),
                             ],
@@ -348,7 +370,7 @@ class _RequestScreenState extends State<RequestScreen> {
                         padding: const EdgeInsets.all(16),
                         itemCount: docs.length,
                         itemBuilder: (context, index) {
-                          final request = Request.fromSnapshot(docs[index]);
+                          final equipment = Equipment.fromSnapshot(docs[index]);
                           
                           return Card(
                             elevation: 2,
@@ -358,15 +380,15 @@ class _RequestScreenState extends State<RequestScreen> {
                             ),
                             child: ExpansionTile(
                               leading: CircleAvatar(
-                                backgroundColor: _getStatusColor(request.status),
+                                backgroundColor: _getStatusColor(equipment.status),
                                 child: Icon(
-                                  _getStatusIcon(request.status),
+                                  _getStatusIcon(equipment.status),
                                   color: Colors.white,
                                   size: 20,
                                 ),
                               ),
                               title: Text(
-                                request.title,
+                                equipment.name,
                                 style: GoogleFonts.poppins(
                                   fontWeight: FontWeight.w600,
                                   color: Colors.blueGrey[900],
@@ -376,14 +398,14 @@ class _RequestScreenState extends State<RequestScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'Status: ${request.status} | Priority: ${request.priority}',
+                                    'Type: ${equipment.type} | Status: ${equipment.status}',
                                     style: GoogleFonts.poppins(
                                       fontSize: 12,
                                       color: Colors.grey[600],
                                     ),
                                   ),
                                   Text(
-                                    'Created: ${request.createdAt != null ? DateFormat.yMMMd().format(request.createdAt!) : 'Unknown date'}',
+                                    'Serial: ${equipment.serialNumber.isEmpty ? 'N/A' : equipment.serialNumber}',
                                     style: GoogleFonts.poppins(
                                       fontSize: 12,
                                       color: Colors.grey[600],
@@ -397,16 +419,18 @@ class _RequestScreenState extends State<RequestScreen> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      _buildDetailRow('Description', request.description),
-                                      _buildDetailRow('Created By', request.createdByEmail ?? 'Unknown'),
-                                      if (request.attachments.isNotEmpty)
-                                        _buildAttachmentsSection(request.attachments),
-                                      if (request.comments.isNotEmpty) 
-                                        _buildCommentsSection(request.comments),
-                                      if (request.workOrderIds.isNotEmpty) 
-                                        _buildWorkOrdersSection(request.workOrderIds),
+                                      _buildDetailRow('Location ID', equipment.locationId.isEmpty ? 'N/A' : equipment.locationId),
+                                      _buildDetailRow('Purchase Price', '\$${equipment.purchasePrice.toStringAsFixed(2)}'),
+                                      _buildDetailRow('Warranty', '${equipment.warrantyMonths} months'),
+                                      _buildDetailRow('Created', equipment.createdAt != null ? DateFormat.yMMMd().format(equipment.createdAt!) : 'Unknown date'),
+                                      if (equipment.notes.isNotEmpty)
+                                        _buildDetailRow('Notes', equipment.notes),
+                                      if (equipment.attachments.isNotEmpty)
+                                        _buildAttachmentsSection(equipment.attachments),
+                                      if (equipment.maintenanceHistory.isNotEmpty) 
+                                        _buildHistorySection(equipment.maintenanceHistory),
                                       const SizedBox(height: 12),
-                                      _buildActionButtons(request),
+                                      _buildActionButtons(equipment),
                                     ],
                                   ),
                                 ),
@@ -426,14 +450,30 @@ class _RequestScreenState extends State<RequestScreen> {
             backgroundColor: Colors.blueGrey[800],
             icon: Icon(_showForm ? Icons.close : Icons.add, color: Colors.white),
             label: Text(
-              _showForm ? 'Cancel' : 'New Request',
+              _showForm ? 'Cancel' : 'New Equipment',
               style: GoogleFonts.poppins(color: Colors.white),
             ),
           ),
-          bottomSheet: _showForm ? _buildRequestForm() : null,
+          bottomSheet: _showForm ? _buildEquipmentForm() : null,
         ),
       ),
     );
+  }
+
+  Stream<QuerySnapshot> _buildEquipmentStream() {
+    Query query = FirebaseFirestore.instance
+        .collection('facilities')
+        .doc(widget.facilityId)
+        .collection('equipment');
+
+    if (_statusFilter != 'All') {
+      query = query.where('status', isEqualTo: _statusFilter);
+    }
+    if (_typeFilter != 'All') {
+      query = query.where('type', isEqualTo: _typeFilter);
+    }
+
+    return query.orderBy('createdAt', descending: true).snapshots();
   }
 
   Widget _buildDetailRow(String label, String value) {
@@ -494,21 +534,21 @@ class _RequestScreenState extends State<RequestScreen> {
     );
   }
 
-  Widget _buildCommentsSection(List<Map<String, dynamic>> comments) {
+  Widget _buildHistorySection(List<Map<String, dynamic>> history) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Comments:',
+            'Maintenance History:',
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w500,
               color: Colors.blueGrey[700],
             ),
           ),
           const SizedBox(height: 4),
-          ...comments.map((comment) => Container(
+          ...history.map((entry) => Container(
                 margin: const EdgeInsets.only(bottom: 4),
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
@@ -519,16 +559,21 @@ class _RequestScreenState extends State<RequestScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      comment['text'] ?? '',
-                      style: GoogleFonts.poppins(fontSize: 12),
+                      entry['action'] ?? '',
+                      style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500),
                     ),
                     Text(
-                      'by ${comment['by'] ?? 'Unknown'} at ${comment['timestamp'] != null ? DateFormat.yMMMd().format((comment['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
+                      'at ${entry['timestamp'] != null ? DateFormat.yMMMd().format((entry['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
                       style: GoogleFonts.poppins(
                         fontSize: 10,
                         color: Colors.grey[600],
                       ),
                     ),
+                    if (entry['notes'] != null && entry['notes'].isNotEmpty)
+                      Text(
+                        entry['notes'],
+                        style: GoogleFonts.poppins(fontSize: 11),
+                      ),
                   ],
                 ),
               )),
@@ -537,55 +582,12 @@ class _RequestScreenState extends State<RequestScreen> {
     );
   }
 
-  Widget _buildWorkOrdersSection(List<String> workOrderIds) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Work Orders:',
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.w500,
-              color: Colors.blueGrey[700],
-            ),
-          ),
-          const SizedBox(height: 4),
-          ...workOrderIds.map((workOrderId) => StreamBuilder<DocumentSnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('facilities')
-                    .doc(widget.facilityId)
-                    .collection('work_orders')
-                    .doc(workOrderId)
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) return const SizedBox.shrink();
-                  final workOrder = snapshot.data!;
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 4),
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.green[50],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '${workOrder['title'] ?? 'Untitled'} - Status: ${workOrder['clientStatus'] ?? 'Unknown'}',
-                      style: GoogleFonts.poppins(fontSize: 12),
-                    ),
-                  );
-                },
-              )),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButtons(Request request) {
+  Widget _buildActionButtons(Equipment equipment) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         TextButton.icon(
-          onPressed: () => _showUpdateStatusDialog(request),
+          onPressed: () => _showUpdateStatusDialog(equipment),
           icon: const Icon(Icons.edit, size: 16),
           label: Text('Update Status', style: GoogleFonts.poppins()),
           style: TextButton.styleFrom(
@@ -596,20 +598,20 @@ class _RequestScreenState extends State<RequestScreen> {
     );
   }
 
-  void _showUpdateStatusDialog(Request request) {
-    final commentController = TextEditingController();
-    String selectedStatus = request.status;
+  void _showUpdateStatusDialog(Equipment equipment) {
+    final notesController = TextEditingController();
+    String selectedStatus = equipment.status;
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Update Request Status', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Update Equipment Status', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             DropdownButtonFormField<String>(
               value: selectedStatus,
-              items: ['Open', 'In Progress', 'Closed']
+              items: ['Active', 'Inactive', 'Under Repair', 'Decommissioned']
                   .map((status) => DropdownMenuItem(
                         value: status,
                         child: Text(status, style: GoogleFonts.poppins()),
@@ -624,9 +626,9 @@ class _RequestScreenState extends State<RequestScreen> {
             ),
             const SizedBox(height: 16),
             TextField(
-              controller: commentController,
+              controller: notesController,
               decoration: InputDecoration(
-                labelText: 'Comment (optional)',
+                labelText: 'Notes (optional)',
                 border: const OutlineInputBorder(),
                 labelStyle: GoogleFonts.poppins(),
               ),
@@ -642,7 +644,7 @@ class _RequestScreenState extends State<RequestScreen> {
           ),
           ElevatedButton(
             onPressed: () {
-              _updateRequest(request.id, selectedStatus, commentController.text);
+              _updateStatus(equipment.id, selectedStatus, notesController.text);
               Navigator.pop(context);
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey[800]),
@@ -653,9 +655,9 @@ class _RequestScreenState extends State<RequestScreen> {
     );
   }
 
-  Widget _buildRequestForm() {
+  Widget _buildEquipmentForm() {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.7,
+      height: MediaQuery.of(context).size.height * 0.8,
       padding: const EdgeInsets.all(16.0),
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -675,7 +677,7 @@ class _RequestScreenState extends State<RequestScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Submit New Request',
+                'Add New Equipment',
                 style: GoogleFonts.poppins(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -684,12 +686,10 @@ class _RequestScreenState extends State<RequestScreen> {
               ),
               const SizedBox(height: 16),
               TextFormField(
-                controller: _titleController,
+                controller: _nameController,
                 decoration: InputDecoration(
-                  labelText: 'Title',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+                  labelText: 'Equipment Name',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
@@ -697,41 +697,21 @@ class _RequestScreenState extends State<RequestScreen> {
                   labelStyle: GoogleFonts.poppins(),
                 ),
                 style: GoogleFonts.poppins(),
-                validator: (value) => value!.isEmpty ? 'Enter a title' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _descriptionController,
-                decoration: InputDecoration(
-                  labelText: 'Description',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
-                  ),
-                  labelStyle: GoogleFonts.poppins(),
-                ),
-                style: GoogleFonts.poppins(),
-                maxLines: 3,
-                validator: (value) => value!.isEmpty ? 'Enter a description' : null,
+                validator: (value) => value!.isEmpty ? 'Enter equipment name' : null,
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _priority,
-                items: ['Low', 'Medium', 'High']
-                    .map((p) => DropdownMenuItem(
-                          value: p,
-                          child: Text(p, style: GoogleFonts.poppins()),
+                value: _typeController.text.isEmpty ? 'Electrical' : _typeController.text,
+                items: ['Electrical', 'Mechanical', 'HVAC', 'Plumbing', 'Safety', 'IT Equipment']
+                    .map((type) => DropdownMenuItem(
+                          value: type,
+                          child: Text(type, style: GoogleFonts.poppins()),
                         ))
                     .toList(),
-                onChanged: (value) => setState(() => _priority = value!),
+                onChanged: (value) => _typeController.text = value!,
                 decoration: InputDecoration(
-                  labelText: 'Priority',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+                  labelText: 'Equipment Type',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
@@ -741,12 +721,89 @@ class _RequestScreenState extends State<RequestScreen> {
               ),
               const SizedBox(height: 16),
               TextFormField(
-                controller: _commentController,
+                controller: _serialController,
                 decoration: InputDecoration(
-                  labelText: 'Comment (optional)',
-                  border: OutlineInputBorder(
+                  labelText: 'Serial Number (optional)',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
                   ),
+                  labelStyle: GoogleFonts.poppins(),
+                ),
+                style: GoogleFonts.poppins(),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _locationController,
+                decoration: InputDecoration(
+                  labelText: 'Location ID (optional)',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
+                  ),
+                  labelStyle: GoogleFonts.poppins(),
+                ),
+                style: GoogleFonts.poppins(),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _purchasePriceController,
+                decoration: InputDecoration(
+                  labelText: 'Purchase Price (optional)',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
+                  ),
+                  labelStyle: GoogleFonts.poppins(),
+                  prefixText: '\$ ',
+                ),
+                style: GoogleFonts.poppins(),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _warrantyController,
+                decoration: InputDecoration(
+                  labelText: 'Warranty Months (optional)',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
+                  ),
+                  labelStyle: GoogleFonts.poppins(),
+                ),
+                style: GoogleFonts.poppins(),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: _status,
+                items: ['Active', 'Inactive', 'Under Repair', 'Decommissioned']
+                    .map((status) => DropdownMenuItem(
+                          value: status,
+                          child: Text(status, style: GoogleFonts.poppins()),
+                        ))
+                    .toList(),
+                onChanged: (value) => setState(() => _status = value!),
+                decoration: InputDecoration(
+                  labelText: 'Status',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
+                  ),
+                  labelStyle: GoogleFonts.poppins(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _notesController,
+                decoration: InputDecoration(
+                  labelText: 'Notes (optional)',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
@@ -779,7 +836,7 @@ class _RequestScreenState extends State<RequestScreen> {
                   spacing: 8,
                   children: _attachmentUrls
                       .map((attachment) => Chip(
-                            label: Text(attachment['name']!, style: GoogleFonts.poppins(fontSize: 12)),
+                            label: Text(attachment['name'] ?? 'Unknown', style: GoogleFonts.poppins(fontSize: 12)),
                             backgroundColor: Colors.blue[50],
                           ))
                       .toList(),
@@ -789,14 +846,14 @@ class _RequestScreenState extends State<RequestScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _submitRequest,
+                  onPressed: _addEquipment,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueGrey[800],
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   child: Text(
-                    'Submit Request',
+                    'Add Equipment',
                     style: GoogleFonts.poppins(
                       color: Colors.white,
                       fontSize: 16,
@@ -814,12 +871,14 @@ class _RequestScreenState extends State<RequestScreen> {
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'open':
-        return Colors.blue;
-      case 'in progress':
-        return Colors.orange;
-      case 'closed':
+      case 'active':
         return Colors.green;
+      case 'inactive':
+        return Colors.grey;
+      case 'under repair':
+        return Colors.orange;
+      case 'decommissioned':
+        return Colors.red;
       default:
         return Colors.grey;
     }
@@ -827,12 +886,14 @@ class _RequestScreenState extends State<RequestScreen> {
 
   IconData _getStatusIcon(String status) {
     switch (status.toLowerCase()) {
-      case 'open':
-        return Icons.radio_button_unchecked;
-      case 'in progress':
-        return Icons.hourglass_empty;
-      case 'closed':
+      case 'active':
         return Icons.check_circle;
+      case 'inactive':
+        return Icons.pause_circle;
+      case 'under repair':
+        return Icons.build_circle;
+      case 'decommissioned':
+        return Icons.cancel;
       default:
         return Icons.help;
     }

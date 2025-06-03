@@ -1,7 +1,7 @@
 import 'package:cmms/authentication/login_screen.dart';
 import 'package:cmms/authentication/registration_screen.dart';
 import 'package:cmms/authentication/splaschscreen.dart';
-import 'package:cmms/screens/home_screen.dart';
+import 'package:cmms/screens/dashboard_screen.dart';
 import 'package:cmms/services/notification_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -136,7 +136,7 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    const String defaultFacilityId = ''; // Remove default facility
+// Remove default facility
 
     return MaterialApp(
       title: 'Swedish Embassy Facility Management',
@@ -150,7 +150,7 @@ class _MyAppState extends State<MyApp> {
       routes: {
         '/home': (context) {
           final args = ModalRoute.of(context)?.settings.arguments as String?;
-          return HomeScreen(facilityId: args ?? defaultFacilityId);
+          return DashboardScreen(facilityId: args ?? '', role: '',);
         },
         '/login': (context) => const LoginScreen(),
         '/registration': (context) => const RegistrationScreen(),
