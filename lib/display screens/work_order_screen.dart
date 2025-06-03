@@ -42,7 +42,22 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> {
   }
 
   Future<void> _addWorkOrder() async {
-    if (_formKey.currentState!.validate()) {
+    // Allow form submission without a request when none exist
+    bool hasOpenRequests = false;
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('facilities')
+          .doc(widget.facilityId)
+          .collection('requests')
+          .where('status', isEqualTo: 'Open')
+          .limit(1)
+          .get();
+      hasOpenRequests = snapshot.docs.isNotEmpty;
+    } catch(e) {
+      _logger.e('Error checking for open requests: $e');
+    }
+
+    if (_formKey.currentState!.validate() || !hasOpenRequests) {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
         _showSnackBar('Please sign in to add work orders');
@@ -243,7 +258,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> {
                           items: ['All', 'Open', 'In Progress', 'Closed']
                               .map((s) => DropdownMenuItem(
                                     value: s,
-                                    child: Text(s, style: GoogleFonts.poppins()),
+                                    child: Text(s, style: GoogleFonts.poppins(color: Colors.blueGrey[800])),
                                   ))
                               .toList(),
                           onChanged: (value) => setState(() => _statusFilter = value!),
@@ -256,7 +271,9 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> {
                             filled: true,
                             fillColor: Colors.white,
                           ),
-                          style: GoogleFonts.poppins(),
+                          style: GoogleFonts.poppins(color: Colors.blueGrey[800], fontWeight: FontWeight.w500),
+                          dropdownColor: Colors.white,
+                          icon: Icon(Icons.arrow_drop_down, color: Colors.blueGrey[800]),
                         ),
                       ),
                     ],
@@ -616,36 +633,67 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('facilities')
-                    .doc(widget.facilityId)
-                    .collection('requests')
-                    .where('status', isEqualTo: 'Open')
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) return const CircularProgressIndicator();
-                  final requests = snapshot.data!.docs;
-                  return DropdownButtonFormField<String>(
-                    value: _selectedRequestId,
-                    hint: Text('Select Request', style: GoogleFonts.poppins()),
-                    items: requests.map((doc) {
-                      return DropdownMenuItem(
-                        value: doc.id,
-                        child: Text(doc['title'] ?? 'Untitled', style: GoogleFonts.poppins()),
-                      );
-                    }).toList(),
-                    onChanged: (value) => setState(() => _selectedRequestId = value),
-                    decoration: InputDecoration(
-                      labelText: 'Related Request',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
+              // Replace the entire StreamBuilder with this simpler field
+              TextFormField(
+                controller: TextEditingController(text: _selectedRequestId != null ? "Request ID: $_selectedRequestId" : ""),
+                decoration: InputDecoration(
+                  labelText: 'Related Request',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
+                  ),
+                  labelStyle: GoogleFonts.poppins(),
+                  hintText: 'Create a request first',
+                  hintStyle: GoogleFonts.poppins(color: Colors.grey),
+                  suffixIcon: Icon(Icons.assignment, color: Colors.blueGrey[600]),
+                ),
+                style: GoogleFonts.poppins(),
+                readOnly: true,
+                onTap: () async {
+                  // Show dialog to select from available requests
+                  final QuerySnapshot snapshot = await FirebaseFirestore.instance
+                      .collection('facilities')
+                      .doc(widget.facilityId)
+                      .collection('requests')
+                      .where('status', isEqualTo: 'Open')
+                      .get();
+                  
+                  if (snapshot.docs.isEmpty) {
+                    _showSnackBar('No open requests available. Create a request first.');
+                    return;
+                  }
+                  
+                  if (!mounted) return;
+                  
+                  await showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text('Select a Request', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                      content: SizedBox(
+                        width: double.maxFinite,
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: snapshot.docs.length,
+                          itemBuilder: (context, index) {
+                            final doc = snapshot.docs[index];
+                            return ListTile(
+                              title: Text(doc['title'] ?? 'Untitled', style: GoogleFonts.poppins()),
+                              onTap: () {
+                                setState(() => _selectedRequestId = doc.id);
+                                Navigator.pop(context);
+                              },
+                            );
+                          },
+                        ),
                       ),
-                      labelStyle: GoogleFonts.poppins(),
+                      actions: [
+                        TextButton(
+                          child: Text('Cancel', style: GoogleFonts.poppins()),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
                     ),
-                    validator: (value) => value == null ? 'Select a request' : null,
                   );
                 },
               ),
@@ -680,32 +728,64 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> {
                 maxLines: 3,
               ),
               const SizedBox(height: 16),
-              StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .where('role', isEqualTo: 'technician')
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) return const CircularProgressIndicator();
-                  final users = snapshot.data!.docs;
-                  return DropdownButtonFormField<String>(
-                    value: _selectedTechnicianId,
-                    hint: Text('Select Technician', style: GoogleFonts.poppins()),
-                    items: users.map((user) {
-                      return DropdownMenuItem(
-                        value: user.id,
-                        child: Text(user['email'] ?? 'Unknown', style: GoogleFonts.poppins()),
-                      );
-                    }).toList(),
-                    onChanged: (value) => setState(() => _selectedTechnicianId = value),
-                    decoration: InputDecoration(
-                      labelText: 'Assigned To',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
+              // Replace the entire StreamBuilder with this simpler field
+              TextFormField(
+                controller: TextEditingController(text: _selectedTechnicianId != null ? "Technician ID: $_selectedTechnicianId" : ""),
+                decoration: InputDecoration(
+                  labelText: 'Assigned To',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
+                  ),
+                  labelStyle: GoogleFonts.poppins(),
+                  hintText: 'Select a technician (optional)',
+                  hintStyle: GoogleFonts.poppins(color: Colors.grey),
+                  suffixIcon: Icon(Icons.person, color: Colors.blueGrey[600]),
+                ),
+                style: GoogleFonts.poppins(),
+                readOnly: true,
+                onTap: () async {
+                  // Show dialog to select from available technicians
+                  final QuerySnapshot snapshot = await FirebaseFirestore.instance
+                      .collection('users')
+                      .where('role', isEqualTo: 'technician')
+                      .get();
+                  
+                  if (snapshot.docs.isEmpty) {
+                    _showSnackBar('No technicians available.');
+                    return;
+                  }
+                  
+                  if (!mounted) return;
+                  
+                  await showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text('Select a Technician', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                      content: SizedBox(
+                        width: double.maxFinite,
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: snapshot.docs.length,
+                          itemBuilder: (context, index) {
+                            final doc = snapshot.docs[index];
+                            return ListTile(
+                              title: Text(doc['email'] ?? 'Unknown', style: GoogleFonts.poppins()),
+                              onTap: () {
+                                setState(() => _selectedTechnicianId = doc.id);
+                                Navigator.pop(context);
+                              },
+                            );
+                          },
+                        ),
                       ),
-                      labelStyle: GoogleFonts.poppins(),
+                      actions: [
+                        TextButton(
+                          child: Text('Cancel', style: GoogleFonts.poppins()),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
                     ),
                   );
                 },
