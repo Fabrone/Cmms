@@ -17,12 +17,14 @@ class _KpiScreenState extends State<KpiScreen> {
   String _timeFilter = 'All Time';
   DateTime? _startDate;
   DateTime? _endDate;
+  late Stream<Map<String, dynamic>> _kpiStream;
 
   @override
   void initState() {
     super.initState();
     _logger.i('KpiScreen initialized: facilityId=${widget.facilityId}');
     _setDateRange();
+    _initializeKpiStream();
   }
 
   void _setDateRange() {
@@ -50,11 +52,17 @@ class _KpiScreenState extends State<KpiScreen> {
     }
   }
 
+  void _initializeKpiStream() {
+    // Create a stream that combines multiple collection streams for real-time updates
+    _kpiStream = Stream.periodic(const Duration(seconds: 2), (i) => i)
+        .asyncMap((_) => _calculateKpis());
+  }
+
   Future<Map<String, dynamic>> _calculateKpis() async {
     try {
-      _logger.i('Calculating KPIs for facility: ${widget.facilityId}');
+      _logger.i('Calculating real-time KPIs for facility: ${widget.facilityId}');
       
-      // Work Orders KPIs
+      // Work Orders KPIs with real-time data
       Query workOrderQuery = FirebaseFirestore.instance
           .collection('facilities')
           .doc(widget.facilityId)
@@ -73,7 +81,7 @@ class _KpiScreenState extends State<KpiScreen> {
       final openWorkOrders = workOrders.docs.where((doc) => doc['status'] == 'Open').length;
       final completionRate = totalWorkOrders > 0 ? (completedWorkOrders / totalWorkOrders * 100) : 0.0;
 
-      // Requests KPIs
+      // Requests KPIs with real-time data
       Query requestQuery = FirebaseFirestore.instance
           .collection('facilities')
           .doc(widget.facilityId)
@@ -89,8 +97,9 @@ class _KpiScreenState extends State<KpiScreen> {
       final totalRequests = requests.docs.length;
       final openRequests = requests.docs.where((doc) => doc['status'] == 'Open').length;
       final closedRequests = requests.docs.where((doc) => doc['status'] == 'Closed').length;
+      final inProgressRequests = requests.docs.where((doc) => doc['status'] == 'In Progress').length;
 
-      // Equipment KPIs
+      // Equipment KPIs with real-time data
       final equipment = await FirebaseFirestore.instance
           .collection('facilities')
           .doc(widget.facilityId)
@@ -99,8 +108,9 @@ class _KpiScreenState extends State<KpiScreen> {
       final totalEquipment = equipment.docs.length;
       final activeEquipment = equipment.docs.where((doc) => doc['status'] == 'Active').length;
       final underRepairEquipment = equipment.docs.where((doc) => doc['status'] == 'Under Repair').length;
+      final inactiveEquipment = equipment.docs.where((doc) => doc['status'] == 'Inactive').length;
 
-      // Inventory KPIs
+      // Inventory KPIs with real-time data
       final inventory = await FirebaseFirestore.instance
           .collection('facilities')
           .doc(widget.facilityId)
@@ -113,8 +123,9 @@ class _KpiScreenState extends State<KpiScreen> {
         return quantity <= reorderPoint && quantity > 0;
       }).length;
       final outOfStockItems = inventory.docs.where((doc) => (doc['quantity'] as int? ?? 0) == 0).length;
+      final inStockItems = inventory.docs.where((doc) => (doc['quantity'] as int? ?? 0) > 0).length;
 
-      // Vendor KPIs
+      // Vendor KPIs with real-time data
       final vendors = await FirebaseFirestore.instance
           .collection('facilities')
           .doc(widget.facilityId)
@@ -122,6 +133,7 @@ class _KpiScreenState extends State<KpiScreen> {
           .get();
       final totalVendors = vendors.docs.length;
       final activeVendors = vendors.docs.where((doc) => doc['status'] == 'Active').length;
+      final inactiveVendors = vendors.docs.where((doc) => doc['status'] == 'Inactive').length;
       
       // Calculate average vendor rating
       double totalRating = 0;
@@ -152,6 +164,16 @@ class _KpiScreenState extends State<KpiScreen> {
       }
       final averageResponseTime = workOrdersWithResponseTime > 0 ? totalResponseTime / workOrdersWithResponseTime : 0.0;
 
+      // Calculate efficiency metrics
+      final requestToWorkOrderConversion = totalRequests > 0 ? (totalWorkOrders / totalRequests * 100) : 0.0;
+      final equipmentUtilization = totalEquipment > 0 ? (activeEquipment / totalEquipment * 100) : 0.0;
+      final vendorUtilization = totalVendors > 0 ? (activeVendors / totalVendors * 100) : 0.0;
+
+      // Calculate priority distribution
+      final highPriorityWorkOrders = workOrders.docs.where((doc) => doc['priority'] == 'High').length;
+      final mediumPriorityWorkOrders = workOrders.docs.where((doc) => doc['priority'] == 'Medium').length;
+      final lowPriorityWorkOrders = workOrders.docs.where((doc) => doc['priority'] == 'Low').length;
+
       return {
         'totalWorkOrders': totalWorkOrders,
         'completedWorkOrders': completedWorkOrders,
@@ -161,16 +183,27 @@ class _KpiScreenState extends State<KpiScreen> {
         'totalRequests': totalRequests,
         'openRequests': openRequests,
         'closedRequests': closedRequests,
+        'inProgressRequests': inProgressRequests,
         'totalEquipment': totalEquipment,
         'activeEquipment': activeEquipment,
         'underRepairEquipment': underRepairEquipment,
+        'inactiveEquipment': inactiveEquipment,
         'totalInventoryItems': totalInventoryItems,
         'lowStockItems': lowStockItems,
         'outOfStockItems': outOfStockItems,
+        'inStockItems': inStockItems,
         'totalVendors': totalVendors,
         'activeVendors': activeVendors,
+        'inactiveVendors': inactiveVendors,
         'averageVendorRating': averageVendorRating,
         'averageResponseTime': averageResponseTime,
+        'requestToWorkOrderConversion': requestToWorkOrderConversion,
+        'equipmentUtilization': equipmentUtilization,
+        'vendorUtilization': vendorUtilization,
+        'highPriorityWorkOrders': highPriorityWorkOrders,
+        'mediumPriorityWorkOrders': mediumPriorityWorkOrders,
+        'lowPriorityWorkOrders': lowPriorityWorkOrders,
+        'lastUpdated': DateTime.now().toIso8601String(),
       };
     } catch (e) {
       _logger.e('Error calculating KPIs: $e');
@@ -189,7 +222,7 @@ class _KpiScreenState extends State<KpiScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: Text(
-            'Key Performance Indicators',
+            'Real-time KPIs',
             style: GoogleFonts.poppins(
               color: Colors.white,
               fontWeight: FontWeight.bold,
@@ -202,6 +235,16 @@ class _KpiScreenState extends State<KpiScreen> {
             onPressed: () => Navigator.pop(context),
           ),
           elevation: 0,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh, color: Colors.white),
+              onPressed: () {
+                setState(() {
+                  _initializeKpiStream();
+                });
+              },
+            ),
+          ],
         ),
         body: SafeArea(
           child: Column(
@@ -233,6 +276,7 @@ class _KpiScreenState extends State<KpiScreen> {
                           setState(() {
                             _timeFilter = value!;
                             _setDateRange();
+                            _initializeKpiStream();
                           });
                         },
                         decoration: InputDecoration(
@@ -252,16 +296,35 @@ class _KpiScreenState extends State<KpiScreen> {
                   ],
                 ),
               ),
+              // Real-time indicator
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                color: Colors.green[50],
+                child: Row(
+                  children: [
+                    const Icon(Icons.circle, color: Colors.green, size: 12),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Live Data - Auto-updating every 2 seconds',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        color: Colors.green[700],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               // KPI Dashboard
               Expanded(
-                child: FutureBuilder<Map<String, dynamic>>(
-                  future: _calculateKpis(),
+                child: StreamBuilder<Map<String, dynamic>>(
+                  stream: _kpiStream,
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Center(child: CircularProgressIndicator());
                     }
                     if (snapshot.hasError) {
-                      _logger.e('KPI calculation error: ${snapshot.error}');
+                      _logger.e('KPI stream error: ${snapshot.error}');
                       return Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -303,6 +366,32 @@ class _KpiScreenState extends State<KpiScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // Last updated indicator
+                          if (kpis['lastUpdated'] != null)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              margin: const EdgeInsets.only(bottom: 16),
+                              decoration: BoxDecoration(
+                                color: Colors.blue[50],
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.blue[200]!),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.update, color: Colors.blue[700], size: 16),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Last updated: ${DateTime.parse(kpis['lastUpdated']).toLocal().toString().split('.')[0]}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      color: Colors.blue[700],
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
                           // Work Orders Section
                           _buildSectionHeader('Work Orders', Icons.work_outline),
                           const SizedBox(height: 12),
@@ -334,6 +423,37 @@ class _KpiScreenState extends State<KpiScreen> {
                           ]),
                           const SizedBox(height: 24),
 
+                          // Priority Distribution
+                          _buildSectionHeader('Priority Distribution', Icons.priority_high),
+                          const SizedBox(height: 12),
+                          _buildKpiGrid([
+                            _buildKpiCard(
+                              'High Priority',
+                              '${kpis['highPriorityWorkOrders'] ?? 0}',
+                              Icons.warning,
+                              Colors.red,
+                            ),
+                            _buildKpiCard(
+                              'Medium Priority',
+                              '${kpis['mediumPriorityWorkOrders'] ?? 0}',
+                              Icons.info,
+                              Colors.orange,
+                            ),
+                            _buildKpiCard(
+                              'Low Priority',
+                              '${kpis['lowPriorityWorkOrders'] ?? 0}',
+                              Icons.low_priority,
+                              Colors.green,
+                            ),
+                            _buildKpiCard(
+                              'Avg Response Time',
+                              '${(kpis['averageResponseTime'] ?? 0.0).toStringAsFixed(1)}h',
+                              Icons.timer,
+                              Colors.indigo,
+                            ),
+                          ]),
+                          const SizedBox(height: 24),
+
                           // Requests Section
                           _buildSectionHeader('Maintenance Requests', Icons.request_page),
                           const SizedBox(height: 12),
@@ -351,16 +471,16 @@ class _KpiScreenState extends State<KpiScreen> {
                               Colors.amber,
                             ),
                             _buildKpiCard(
-                              'Closed Requests',
-                              '${kpis['closedRequests'] ?? 0}',
-                              Icons.done_all,
-                              Colors.green,
+                              'In Progress',
+                              '${kpis['inProgressRequests'] ?? 0}',
+                              Icons.hourglass_empty,
+                              Colors.orange,
                             ),
                             _buildKpiCard(
-                              'Avg Response Time',
-                              '${(kpis['averageResponseTime'] ?? 0.0).toStringAsFixed(1)}h',
-                              Icons.timer,
-                              Colors.indigo,
+                              'Conversion Rate',
+                              '${(kpis['requestToWorkOrderConversion'] ?? 0.0).toStringAsFixed(1)}%',
+                              Icons.transform,
+                              Colors.teal,
                             ),
                           ]),
                           const SizedBox(height: 24),
@@ -388,9 +508,9 @@ class _KpiScreenState extends State<KpiScreen> {
                               Colors.orange,
                             ),
                             _buildKpiCard(
-                              'Equipment Health',
-                              '${kpis['totalEquipment'] > 0 ? ((kpis['activeEquipment'] / kpis['totalEquipment']) * 100).toStringAsFixed(1) : 0}%',
-                              Icons.health_and_safety,
+                              'Utilization Rate',
+                              '${(kpis['equipmentUtilization'] ?? 0.0).toStringAsFixed(1)}%',
+                              Icons.trending_up,
                               Colors.blue,
                             ),
                           ]),
@@ -407,7 +527,13 @@ class _KpiScreenState extends State<KpiScreen> {
                               Colors.cyan,
                             ),
                             _buildKpiCard(
-                              'Low Stock Items',
+                              'In Stock',
+                              '${kpis['inStockItems'] ?? 0}',
+                              Icons.check_circle,
+                              Colors.green,
+                            ),
+                            _buildKpiCard(
+                              'Low Stock',
                               '${kpis['lowStockItems'] ?? 0}',
                               Icons.warning,
                               Colors.orange,
@@ -417,12 +543,6 @@ class _KpiScreenState extends State<KpiScreen> {
                               '${kpis['outOfStockItems'] ?? 0}',
                               Icons.remove_circle,
                               Colors.red,
-                            ),
-                            _buildKpiCard(
-                              'Stock Health',
-                              '${kpis['totalInventoryItems'] > 0 ? (((kpis['totalInventoryItems'] - kpis['outOfStockItems']) / kpis['totalInventoryItems']) * 100).toStringAsFixed(1) : 0}%',
-                              Icons.trending_up,
-                              Colors.green,
                             ),
                           ]),
                           const SizedBox(height: 24),
@@ -450,8 +570,8 @@ class _KpiScreenState extends State<KpiScreen> {
                               Colors.amber,
                             ),
                             _buildKpiCard(
-                              'Vendor Utilization',
-                              '${kpis['totalVendors'] > 0 ? ((kpis['activeVendors'] / kpis['totalVendors']) * 100).toStringAsFixed(1) : 0}%',
+                              'Utilization Rate',
+                              '${(kpis['vendorUtilization'] ?? 0.0).toStringAsFixed(1)}%',
                               Icons.trending_up,
                               Colors.blue,
                             ),
