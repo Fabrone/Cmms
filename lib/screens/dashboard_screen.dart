@@ -8,17 +8,14 @@ import 'package:cmms/display%20screens/facility_screen.dart';
 import 'package:cmms/display%20screens/inventory_screen.dart';
 import 'package:cmms/display%20screens/kpi_screen.dart';
 import 'package:cmms/display%20screens/price_list_screen.dart';
+import 'package:cmms/display%20screens/report_screen.dart';
 import 'package:cmms/display%20screens/reports_screen.dart';
 import 'package:cmms/display%20screens/request_screen.dart';
 import 'package:cmms/display%20screens/role_assignment_screen.dart';
 import 'package:cmms/display%20screens/schedule_maintenance_screen.dart';
 import 'package:cmms/display%20screens/vendor_screen.dart';
 import 'package:cmms/display%20screens/work_order_screen.dart';
-//import 'package:cmms/screens/equipment_supplied_screen.dart';
-//import 'package:cmms/screens/inventory_screen.dart';
-//import 'package:cmms/screens/kpi_screen.dart';
 import 'package:cmms/screens/user_screen.dart';
-//import 'package:cmms/screens/vendor_screen.dart';
 import 'package:cmms/screens/settings_screen.dart';
 import 'package:cmms/technician/preventive_maintenance_screen.dart';
 import 'package:flutter/material.dart';
@@ -361,7 +358,8 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Requests', 'icon': Icons.request_page},
         {'title': 'Work Orders', 'icon': Icons.work},
         {'title': 'Billing', 'icon': Icons.receipt_long},
-        {'title': 'Settings', 'icon': Icons.settings}, // Settings moved to last
+        {'title': 'Report', 'icon': Icons.bar_chart},
+        {'title': 'Settings', 'icon': Icons.settings}, 
       ],
       'JV Almacis': [
         {'title': 'Building Survey', 'icon': Icons.account_balance},
@@ -379,7 +377,8 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Users', 'icon': Icons.group},
         {'title': 'KPIs', 'icon': Icons.trending_up},
         {'title': 'Billing', 'icon': Icons.receipt_long},
-        {'title': 'Settings', 'icon': Icons.settings}, // Settings moved to last
+        {'title': 'Report', 'icon': Icons.bar_chart},
+        {'title': 'Settings', 'icon': Icons.settings}, 
       ],
     },
     'Technician': {
@@ -393,7 +392,8 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Requests', 'icon': Icons.request_page},
         {'title': 'Work Orders', 'icon': Icons.work},
         {'title': 'Billing', 'icon': Icons.receipt_long},
-        {'title': 'Settings', 'icon': Icons.settings}, // Settings moved to last
+        {'title': 'Report', 'icon': Icons.bar_chart},
+        {'title': 'Settings', 'icon': Icons.settings}, 
       ],
       'JV Almacis': [
         {'title': 'Preventive Maintenance', 'icon': Icons.build_circle},
@@ -408,7 +408,8 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Equipment Supplied', 'icon': Icons.construction},
         {'title': 'Inventory and Parts', 'icon': Icons.inventory},
         {'title': 'Billing', 'icon': Icons.receipt_long},
-        {'title': 'Settings', 'icon': Icons.settings}, // Settings moved to last
+        {'title': 'Report', 'icon': Icons.bar_chart},
+        {'title': 'Settings', 'icon': Icons.settings}, 
       ],
     },
     'User': {
@@ -422,7 +423,7 @@ class DashboardScreenState extends State<DashboardScreen> {
         {'title': 'Equipment Supplied', 'icon': Icons.construction},
         {'title': 'Inventory and Parts', 'icon': Icons.inventory},
         {'title': 'Billing', 'icon': Icons.receipt_long},
-        {'title': 'Settings', 'icon': Icons.settings}, // Settings moved to last
+        {'title': 'Settings', 'icon': Icons.settings}, 
       ],
     },
   };
@@ -709,6 +710,7 @@ class DashboardScreenState extends State<DashboardScreen> {
           'Vendors': () => VendorScreen(facilityId: _selectedFacilityId!),
           'Users': () => UserScreen(facilityId: _selectedFacilityId!),
           'KPIs': () => KpiScreen(facilityId: _selectedFacilityId!),
+          'Report': () => ReportScreen(facilityId: _selectedFacilityId!),
           'Settings': () => SettingsScreen(facilityId: _selectedFacilityId!),
           'Billing': () => BillingScreen(facilityId: _selectedFacilityId!, userRole: _currentRole ?? 'User'),
         };
