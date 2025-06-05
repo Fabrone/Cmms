@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cmms/authentication/registration_screen.dart';
 import 'package:cmms/screens/dashboard_screen.dart';
 import 'package:logger/logger.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -20,6 +21,7 @@ class SplashScreenState extends State<SplashScreen> with TickerProviderStateMixi
   late Animation<double> _textFadeAnimation;
   final Logger _logger = Logger(printer: PrettyPrinter());
   String? _currentRole;
+  bool _navigationCompleted = false;
 
   @override
   void initState() {
@@ -58,29 +60,101 @@ class SplashScreenState extends State<SplashScreen> with TickerProviderStateMixi
   }
 
   Future<void> _initializeAuthAndRoleCheck() async {
-    User? user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      _navigateToRegistration('No user logged in');
-      return;
+    try {
+      // Configure Firebase Auth persistence for web
+      if (kIsWeb) {
+        await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
+      }
+
+      // Wait for auth state to be ready
+      await Future.delayed(const Duration(seconds: 2));
+      
+      User? user = FirebaseAuth.instance.currentUser;
+      _logger.i('Current user: ${user?.uid ?? 'null'}');
+      
+      if (user == null) {
+        _navigateToRegistration('No user logged in');
+        return;
+      }
+
+      // Check if user exists in Users collection
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('Users')
+          .doc(user.uid)
+          .get();
+
+      if (!userDoc.exists) {
+        _navigateToRegistration('User not registered');
+        return;
+      }
+
+      // Initialize role listeners
+      await _determineUserRole(user.uid);
+
+      // Wait for animation to complete before navigation
+      await Future.delayed(const Duration(seconds: 3));
+      
+      if (!_navigationCompleted) {
+        _navigateBasedOnRole();
+      }
+    } catch (e) {
+      _logger.e('Error in auth initialization: $e');
+      if (!_navigationCompleted) {
+        _navigateToRegistration('Authentication error: $e');
+      }
     }
+  }
 
-    // Check if user exists in Users collection
-    DocumentSnapshot userDoc = await FirebaseFirestore.instance
-        .collection('Users')
-        .doc(user.uid)
-        .get();
+  Future<void> _determineUserRole(String uid) async {
+    try {
+      // Check collections in order of priority
+      final adminDoc = await FirebaseFirestore.instance
+          .collection('Admins')
+          .doc(uid)
+          .get();
+      
+      final developerDoc = await FirebaseFirestore.instance
+          .collection('Developers')
+          .doc(uid)
+          .get();
+      
+      final technicianDoc = await FirebaseFirestore.instance
+          .collection('Technicians')
+          .doc(uid)
+          .get();
+      
+      final userDoc = await FirebaseFirestore.instance
+          .collection('Users')
+          .doc(uid)
+          .get();
 
-    if (!userDoc.exists) {
-      _navigateToRegistration('User not registered');
-      return;
+      if (mounted) {
+        setState(() {
+          if (adminDoc.exists) {
+            _currentRole = 'Admin';
+            _logger.i('User is an Admin');
+          } else if (developerDoc.exists) {
+            _currentRole = 'Technician'; // Developers are treated as Technicians
+            _logger.i('User is a Developer (treated as Technician)');
+          } else if (technicianDoc.exists) {
+            _currentRole = 'Technician';
+            _logger.i('User is a Technician');
+          } else if (userDoc.exists && userDoc.data()?['role'] == 'Technician') {
+            _currentRole = 'Technician';
+            _logger.i('User has Technician role in Users collection');
+          } else {
+            _currentRole = 'User';
+            _logger.i('User has default User role');
+          }
+        });
+      }
+
+      // Set up real-time listeners for role changes
+      _listenToRoleChanges(uid);
+    } catch (e) {
+      _logger.e('Error determining user role: $e');
+      _currentRole = 'User';
     }
-
-    // Initialize role listeners
-    _listenToRoleChanges(user.uid);
-
-    // Delay navigation slightly to allow initial role check
-    await Future.delayed(const Duration(seconds: 5));
-    _navigateBasedOnRole();
   }
 
   void _listenToRoleChanges(String uid) {
@@ -91,46 +165,48 @@ class SplashScreenState extends State<SplashScreen> with TickerProviderStateMixi
           .collection(collection)
           .doc(uid)
           .snapshots()
-          .listen((snapshot) {
-        if (mounted) {
+          .listen((snapshot) async {
+        if (mounted && !_navigationCompleted) {
           setState(() {
             if (snapshot.exists) {
               _currentRole = collection == 'Admins'
-                  ? 'MainAdmin'
+                  ? 'Admin'
                   : collection == 'Developers'
-                      ? 'Developer'
+                      ? 'Technician'
                       : 'Technician';
             } else if (_currentRole == (collection == 'Admins'
-                    ? 'MainAdmin'
+                    ? 'Admin'
                     : collection == 'Developers'
-                        ? 'Developer'
+                        ? 'Technician'
                         : 'Technician')) {
               _currentRole = 'User';
             }
           });
-          _navigateBasedOnRole();
         }
       }, onError: (e) {
         _logger.e('Error listening to $collection role: $e');
       });
     }
 
-    // Listen to auth state
+    // Listen to auth state changes
     FirebaseAuth.instance.authStateChanges().listen((user) {
-      if (user == null && mounted) {
+      if (user == null && mounted && !_navigationCompleted) {
         _navigateToRegistration('User logged out');
       }
     });
   }
 
   void _navigateBasedOnRole() {
-    if (!mounted) return;
+    if (!mounted || _navigationCompleted) return;
 
-    // Navigate to DashboardScreen with the current role
+    _navigationCompleted = true;
+    _logger.i('Navigating to dashboard with role: ${_currentRole ?? 'User'}');
+
+    // Always navigate to DashboardScreen - let it handle facility selection
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (context) => DashboardScreen(
-          facilityId: 'facility1',
+          facilityId: '', // Empty facility ID to trigger facility selection
           role: _currentRole ?? 'User',
         ),
       ),
@@ -138,13 +214,22 @@ class SplashScreenState extends State<SplashScreen> with TickerProviderStateMixi
   }
 
   void _navigateToRegistration(String message) {
-    if (mounted) {
+    if (mounted && !_navigationCompleted) {
+      _navigationCompleted = true;
+      _logger.i('Navigating to registration: $message');
+      
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (context) => const RegistrationScreen()),
       );
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      
+      // Show message after navigation
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+        }
+      });
     }
   }
 
