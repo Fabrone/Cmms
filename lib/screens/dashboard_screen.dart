@@ -27,6 +27,9 @@ import 'package:logger/logger.dart';
 import 'package:cmms/authentication/login_screen.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+// Add this import at the top of the file
+import 'dart:async';
+
 class DashboardScreen extends StatefulWidget {
   final String facilityId;
   final String role;
@@ -41,12 +44,15 @@ class DashboardScreenState extends State<DashboardScreen> {
   final logger = Logger(printer: PrettyPrinter());
   final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  String? _currentRole;
+  String _currentRole = 'User';
   bool _isDeveloper = false;
   String? _selectedFacilityId;
-  String? _organization;
+  String _organization = '-';
   bool _isFacilitySelectionActive = true;
-
+  
+  // Stream subscriptions for role listeners
+  List<StreamSubscription<DocumentSnapshot>> _roleSubscriptions = [];
+  
   @override
   void initState() {
     super.initState();
@@ -56,245 +62,150 @@ class DashboardScreenState extends State<DashboardScreen> {
     _selectedFacilityId = widget.facilityId.isNotEmpty ? widget.facilityId : null;
     _isFacilitySelectionActive = widget.facilityId.isEmpty;
     
-    _initializeRoleListeners();
+    // Initialize role checking
+    _checkUserRole();
+  }
+  
+  @override
+  void dispose() {
+    // Cancel all stream subscriptions
+    for (var subscription in _roleSubscriptions) {
+      subscription.cancel();
+    }
+    super.dispose();
   }
 
-  Future<void> _initializeRoleListeners() async {
+  // Comprehensive role checking system
+  Future<void> _checkUserRole() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       _redirectToLogin('No user logged in');
       return;
     }
 
-    logger.i('Initializing role for UID: ${user.uid}');
+    logger.i('Checking roles for user: ${user.uid}');
+    
+    // Cancel any existing subscriptions
+    for (var subscription in _roleSubscriptions) {
+      subscription.cancel();
+    }
+    _roleSubscriptions = [];
+    
+    // Set up real-time listeners for all role collections
+    _setupRoleListener('Admins', user.uid);
+    _setupRoleListener('Developers', user.uid);
+    _setupRoleListener('Technicians', user.uid);
+    _setupRoleListener('Users', user.uid);
+    
+    // Initial role check
+    await _updateUserRole(user.uid);
+  }
+  
+  // Set up a real-time listener for a specific role collection
+  void _setupRoleListener(String collection, String uid) {
+    final stream = FirebaseFirestore.instance
+        .collection(collection)
+        .doc(uid)
+        .snapshots();
+    
+    final subscription = stream.listen(
+      (snapshot) {
+        logger.i('Role update detected in $collection for $uid');
+        _updateUserRole(uid);
+      },
+      onError: (error) {
+        logger.e('Error in $collection listener: $error');
+      }
+    );
+    
+    _roleSubscriptions.add(subscription);
+  }
 
+  // Comprehensive role update logic
+  Future<void> _updateUserRole(String uid) async {
     try {
-      // Check collections in order of priority
-      final adminDoc = await FirebaseFirestore.instance
-          .collection('Admins')
-          .doc(user.uid)
-          .get();
+      logger.i('Updating user role for $uid');
       
-      final developerDoc = await FirebaseFirestore.instance
-          .collection('Developers')
-          .doc(user.uid)
-          .get();
+      // Get all role documents
+      final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(uid).get();
+      final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(uid).get();
+      final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(uid).get();
+      final userDoc = await FirebaseFirestore.instance.collection('Users').doc(uid).get();
       
-      final technicianDoc = await FirebaseFirestore.instance
-          .collection('Technicians')
-          .doc(user.uid)
-          .get();
+      // Determine role based on priority
+      String newRole = 'User';
+      String newOrg = '-';
+      bool isDev = false;
       
-      final userDoc = await FirebaseFirestore.instance
-          .collection('Users')
-          .doc(user.uid)
-          .get();
-
+      // Log document existence for debugging
+      logger.i('Role documents: Admin=${adminDoc.exists}, Developer=${developerDoc.exists}, Technician=${technicianDoc.exists}, User=${userDoc.exists}');
+      
+      if (adminDoc.exists) {
+        // Admin has highest priority
+        newRole = 'Admin';
+        final adminData = adminDoc.data();
+        newOrg = adminData?['organization'] ?? '-';
+        logger.i('User is an Admin for organization: $newOrg');
+      } 
+      else if (developerDoc.exists) {
+        // Developer is treated as Technician for JV Almacis
+        newRole = 'Technician';
+        newOrg = 'JV Almacis';
+        isDev = true;
+        logger.i('User is a Developer (treated as Technician) for JV Almacis');
+      }
+      else if (technicianDoc.exists) {
+        // Regular Technician
+        newRole = 'Technician';
+        final techData = technicianDoc.data();
+        newOrg = techData?['organization'] ?? '-';
+        logger.i('User is a Technician for organization: $newOrg');
+      }
+      else if (userDoc.exists) {
+        // Check if user has Technician role in Users collection
+        final userData = userDoc.data();
+        if (userData != null && userData['role'] == 'Technician') {
+          newRole = 'Technician';
+          newOrg = '-';
+          logger.i('User has Technician role in Users collection');
+        } else {
+          newRole = 'User';
+          newOrg = '-';
+          logger.i('User has regular User role');
+        }
+      }
+      
+      // Update state if mounted and role has changed
       if (mounted) {
         setState(() {
-          _isDeveloper = developerDoc.exists;
-          
-          Map<String, dynamic>? userData;
-          Map<String, dynamic>? adminData;
-          Map<String, dynamic>? techData;
-          
-          // Check admin first - highest priority
-          if (adminDoc.exists) {
-            _currentRole = 'Admin';
-            adminData = adminDoc.data();
-            _organization = adminData?['organization'] ?? '-';
-            logger.i('User is an Admin with organization: $_organization');
-          } 
-          // Then check if user is BOTH developer AND technician
-          else if (developerDoc.exists && technicianDoc.exists) {
-            _currentRole = 'Technician';
-            techData = technicianDoc.data();
-            _organization = techData?['organization'] ?? 'JV Almacis';
-            logger.i('User is both Developer and Technician with organization: $_organization');
-          }
-          // Then check developer only
-          else if (developerDoc.exists) {
-            _currentRole = 'Technician'; // Developers are treated as Technicians
-            _organization = 'JV Almacis'; // Developers are under JV Almacis
-            logger.i('User is a Developer treated as Technician for JV Almacis');
-          } 
-          // Then check regular technician
-          else if (technicianDoc.exists) {
-            _currentRole = 'Technician';
-            techData = technicianDoc.data();
-            _organization = techData?['organization'] ?? '-';
-            logger.i('User is a regular Technician with organization: $_organization');
-          } 
-          // Finally check user collection for technician role
-          else if (userDoc.exists) {
-            userData = userDoc.data();
-            if (userData?['role'] == 'Technician') {
-              _currentRole = 'Technician';
-              _organization = '-'; // Default organization for Users collection technicians
-              logger.i('User has Technician role in Users collection with organization: $_organization');
-            } else {
-              _currentRole = 'User';
-              _organization = '-';
-              logger.i('User has default User role');
-            }
-          } 
-          // Default to User
-          else {
-            _currentRole = 'User';
-            _organization = '-';
-            logger.i('User has default User role');
-          }
-          
-          logger.i(
-            'Initial role set: $_currentRole, Organization: $_organization, IsDeveloper: $_isDeveloper, AdminDoc: ${adminDoc.exists}, TechnicianDoc: ${technicianDoc.exists}, DeveloperDoc: ${developerDoc.exists}, UserRole: ${userDoc.exists ? (userData?['role'] ?? 'N/A') : 'N/A'}',
-          );
+          _currentRole = newRole;
+          _organization = newOrg;
+          _isDeveloper = isDev;
         });
+        
+        logger.i('Role updated: $_currentRole, Organization: $_organization, IsDeveloper: $_isDeveloper');
+        
+        // Show notification of role change
+        _messengerKey.currentState?.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Your role is now: $_currentRole${_organization != '-' ? ' ($_organization)' : ''}',
+              style: GoogleFonts.poppins(),
+            ),
+            duration: const Duration(seconds: 3),
+            backgroundColor: Colors.blueGrey[700],
+          ),
+        );
       }
-
-      _listenToRoleChanges(user.uid);
     } catch (e) {
-      logger.e('Error initializing role: $e');
+      logger.e('Error updating user role: $e');
       if (mounted) {
         setState(() {
           _currentRole = 'User';
           _organization = '-';
+          _isDeveloper = false;
         });
       }
-    }
-  }
-
-  void _listenToRoleChanges(String uid) {
-    // Listen to all role collections and update based on priority
-    FirebaseFirestore.instance
-        .collection('Admins')
-        .doc(uid)
-        .snapshots()
-        .listen((adminSnapshot) {
-      _updateRoleFromSnapshots(uid);
-    }, onError: (e) {
-      logger.e('Error listening to Admins role: $e');
-    });
-
-    FirebaseFirestore.instance
-        .collection('Developers')
-        .doc(uid)
-        .snapshots()
-        .listen((developerSnapshot) {
-      _updateRoleFromSnapshots(uid);
-    }, onError: (e) {
-      logger.e('Error listening to Developers role: $e');
-    });
-
-    FirebaseFirestore.instance
-        .collection('Technicians')
-        .doc(uid)
-        .snapshots()
-        .listen((technicianSnapshot) {
-      _updateRoleFromSnapshots(uid);
-    }, onError: (e) {
-      logger.e('Error listening to Technicians role: $e');
-    });
-
-    FirebaseFirestore.instance
-        .collection('Users')
-        .doc(uid)
-        .snapshots()
-        .listen((userSnapshot) {
-      _updateRoleFromSnapshots(uid);
-    }, onError: (e) {
-      logger.e('Error listening to Users role: $e');
-    });
-
-    // Only listen to auth state changes, don't redirect on logout
-    FirebaseAuth.instance.authStateChanges().listen((user) {
-      if (user == null && mounted) {
-        logger.w('User logged out, but not redirecting from dashboard');
-        // Don't automatically redirect - let user navigate manually
-      }
-    });
-  }
-
-  // Centralized method to update role based on all snapshots
-  Future<void> _updateRoleFromSnapshots(String uid) async {
-    if (!mounted) return;
-    
-    try {
-      // Get fresh data from all collections
-      final adminDoc = await FirebaseFirestore.instance
-          .collection('Admins')
-          .doc(uid)
-          .get();
-      
-      final developerDoc = await FirebaseFirestore.instance
-          .collection('Developers')
-          .doc(uid)
-          .get();
-      
-      final technicianDoc = await FirebaseFirestore.instance
-          .collection('Technicians')
-          .doc(uid)
-          .get();
-      
-      final userDoc = await FirebaseFirestore.instance
-          .collection('Users')
-          .doc(uid)
-          .get();
-
-      if (mounted) {
-        setState(() {
-          _isDeveloper = developerDoc.exists;
-          
-          Map<String, dynamic>? userData;
-          Map<String, dynamic>? adminData;
-          Map<String, dynamic>? techData;
-          
-          // Apply role priority logic
-          if (adminDoc.exists) {
-            _currentRole = 'Admin';
-            adminData = adminDoc.data();
-            _organization = adminData?['organization'] ?? '-';
-            logger.i('Role updated to Admin with organization: $_organization');
-          } 
-          else if (developerDoc.exists && technicianDoc.exists) {
-            _currentRole = 'Technician';
-            techData = technicianDoc.data();
-            _organization = techData?['organization'] ?? 'JV Almacis';
-            logger.i('Role updated to Developer+Technician with organization: $_organization');
-          }
-          else if (developerDoc.exists) {
-            _currentRole = 'Technician';
-            _organization = 'JV Almacis';
-            logger.i('Role updated to Developer (treated as Technician) for JV Almacis');
-          } 
-          else if (technicianDoc.exists) {
-            _currentRole = 'Technician';
-            techData = technicianDoc.data();
-            _organization = techData?['organization'] ?? '-';
-            logger.i('Role updated to regular Technician with organization: $_organization');
-          } 
-          else if (userDoc.exists) {
-            userData = userDoc.data();
-            if (userData?['role'] == 'Technician') {
-              _currentRole = 'Technician';
-              _organization = '-';
-              logger.i('Role updated to Technician from Users collection');
-            } else {
-              _currentRole = 'User';
-              _organization = '-';
-              logger.i('Role updated to User');
-            }
-          } 
-          else {
-            _currentRole = 'User';
-            _organization = '-';
-            logger.i('Role updated to default User');
-          }
-          
-          logger.i('Role update complete: $_currentRole, Organization: $_organization, IsDeveloper: $_isDeveloper');
-        });
-      }
-    } catch (e) {
-      logger.e('Error updating role from snapshots: $e');
     }
   }
 
@@ -507,9 +418,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     },
     'User': {
       '-': [
-        'Facilities', 'Locations', 'Schedule Maintenance', 'Preventive Maintenance',
-        'Reports', 'Price Lists', 'Work on Request', 'Work Orders', 'Equipment Supplied',
-        'Inventory and Parts', 'Billing', 'Settings'
+        'Facilities', 'Settings'
       ],
     },
   };
@@ -518,7 +427,7 @@ class DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isTabletOrWeb = screenWidth > 600;
-    final displayRole = _currentRole ?? 'User';
+    final displayRole = _currentRole;
     final isFacilitySelected = _selectedFacilityId != null && _selectedFacilityId!.isNotEmpty;
 
     return PopScope(
@@ -576,6 +485,20 @@ class DashboardScreenState extends State<DashboardScreen> {
               ),
               backgroundColor: Colors.blueGrey,
               actions: [
+                // Show role indicator
+                Padding(
+                  padding: const EdgeInsets.only(right: 16.0),
+                  child: Center(
+                    child: Text(
+                      _currentRole,
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                // Admin-specific actions
                 if (_currentRole == 'Admin' && isFacilitySelected)
                   Padding(
                     padding: const EdgeInsets.only(right: 8.0),
@@ -692,6 +615,39 @@ class DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         children: [
           _buildAppIcon(),
+          // Role indicator
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: Colors.blueGrey[100],
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  _currentRole == 'Admin' 
+                      ? Icons.admin_panel_settings
+                      : _currentRole == 'Technician'
+                          ? Icons.engineering
+                          : Icons.person,
+                  color: Colors.blueGrey[800],
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '$_currentRole${_organization != '-' ? ' ($_organization)' : ''}',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey[800],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
           Expanded(child: ListView(children: _buildMenuItems())),
         ],
       ),
@@ -705,6 +661,39 @@ class DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         children: [
           _buildAppIcon(),
+          // Role indicator
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.blueGrey[100],
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  _currentRole == 'Admin' 
+                      ? Icons.admin_panel_settings
+                      : _currentRole == 'Technician'
+                          ? Icons.engineering
+                          : Icons.person,
+                  color: Colors.blueGrey[800],
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '$_currentRole${_organization != '-' ? ' ($_organization)' : ''}',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey[800],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: ListView(
               children: _buildMenuItems(),
@@ -716,11 +705,24 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   List<Widget> _buildMenuItems() {
-    final role = _currentRole ?? 'User';
-    final org = _organization ?? '-';
+    final role = _currentRole;
+    final org = _organization;
     
     // Get menu items based on role and organization
-    final allowedItems = _roleMenuAccess[role]?[org] ?? _roleMenuAccess['User']!['-']!;
+    List<String> allowedItems = [];
+    
+    // First check if this specific role+org combination exists
+    if (_roleMenuAccess.containsKey(role) && _roleMenuAccess[role]!.containsKey(org)) {
+      allowedItems = _roleMenuAccess[role]![org]!;
+    } 
+    // If not found, try with default org '-'
+    else if (_roleMenuAccess.containsKey(role) && _roleMenuAccess[role]!.containsKey('-')) {
+      allowedItems = _roleMenuAccess[role]!['-']!;
+    }
+    // Fallback to User role with default org
+    else {
+      allowedItems = _roleMenuAccess['User']!['-']!;
+    }
     
     logger.i('Building menu items for role: $role, organization: $org, allowed items: ${allowedItems.length}');
 
@@ -743,7 +745,7 @@ class DashboardScreenState extends State<DashboardScreen> {
           ListTile(
             leading: Icon(icon, color: Colors.blueGrey),
             title: Text(title, style: GoogleFonts.poppins()),
-            onTap: _resetFacilitySelection,
+            onTap: _refreshFacilitiesView,
           ),
         );
         continue;
@@ -801,8 +803,8 @@ class DashboardScreenState extends State<DashboardScreen> {
       return;
     }
 
-    final role = _currentRole ?? 'User';
-    if (role == 'User') {
+    // Special handling for Settings - always accessible
+    if (title != 'Settings' && title != 'Facilities' && _currentRole == 'User') {
       _messengerKey.currentState?.showSnackBar(
         SnackBar(
           content: Text("Wait for Admin's role assignment to utilize the features", style: GoogleFonts.poppins()),
@@ -844,7 +846,7 @@ class DashboardScreenState extends State<DashboardScreen> {
           'KPIs': () => KpiScreen(facilityId: _selectedFacilityId!),
           'Report': () => ReportScreen(facilityId: _selectedFacilityId!),
           'Settings': () => SettingsScreen(facilityId: _selectedFacilityId!),
-          'Billing': () => BillingScreen(facilityId: _selectedFacilityId!, userRole: _currentRole ?? 'User'),
+          'Billing': () => BillingScreen(facilityId: _selectedFacilityId!, userRole: _currentRole),
         };
 
         final screenBuilder = screenMap[title];
