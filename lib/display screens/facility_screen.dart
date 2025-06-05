@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/models/facility.dart';
+import 'package:cmms/screens/dashboard_screen.dart';
 
 class FacilityScreen extends StatefulWidget {
   final String? selectedFacilityId;
@@ -82,13 +83,43 @@ class FacilityScreenState extends State<FacilityScreen> {
     }
   }
 
+  void _navigateBackToDashboard() {
+    // Navigate back to dashboard with menu opened
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DashboardScreen(
+          facilityId: widget.selectedFacilityId ?? '',
+          role: 'User', // This will be updated by the dashboard
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width <= 600;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth <= 600;
 
     return ScaffoldMessenger(
       key: _messengerKey,
       child: Scaffold(
+        appBar: AppBar(
+          title: Text(
+            'Your Facilities',
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: isMobile ? 20 : 24,
+            ),
+          ),
+          backgroundColor: Colors.blueGrey[800],
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: _navigateBackToDashboard,
+          ),
+          elevation: 0,
+        ),
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(16.0),

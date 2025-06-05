@@ -94,10 +94,16 @@ class DashboardScreenState extends State<DashboardScreen> {
         setState(() {
           _isDeveloper = developerDoc.exists;
           
+          // Declare userData at broader scope to fix the error
+          Map<String, dynamic>? userData;
+          Map<String, dynamic>? adminData;
+          Map<String, dynamic>? techData;
+          
           // Check admin first - highest priority
           if (adminDoc.exists) {
             _currentRole = 'Admin';
-            _organization = (adminDoc.data())?['organization'] ?? '-';
+            adminData = adminDoc.data();
+            _organization = adminData?['organization'] ?? '-';
             logger.i('User is an Admin with organization: $_organization');
           } 
           // Then check developer
@@ -109,17 +115,26 @@ class DashboardScreenState extends State<DashboardScreen> {
           // Then check technician
           else if (technicianDoc.exists) {
             _currentRole = 'Technician';
-            _organization = (technicianDoc.data())?['organization'] ?? '-';
+            techData = technicianDoc.data();
+            _organization = techData?['organization'] ?? '-';
             logger.i('User is a Technician with organization: $_organization');
           } 
           // Finally check user collection for technician role
-          else if (userDoc.exists && (userDoc.data())?['role'] == 'Technician') {
-            _currentRole = 'Technician';
-            // Check if they have a technician document for organization
-            _organization = technicianDoc.exists && (technicianDoc.data())?['organization'] != null
-                ? (technicianDoc.data() as Map<String, dynamic>)['organization']
-                : '-';
-            logger.i('User has Technician role in Users collection with organization: $_organization');
+          else if (userDoc.exists) {
+            userData = userDoc.data();
+            if (userData?['role'] == 'Technician') {
+              _currentRole = 'Technician';
+              // Check if they have a technician document for organization
+              techData = technicianDoc.data();
+              _organization = technicianDoc.exists && techData?['organization'] != null
+                  ? techData!['organization']
+                  : '-';
+              logger.i('User has Technician role in Users collection with organization: $_organization');
+            } else {
+              _currentRole = 'User';
+              _organization = '-';
+              logger.i('User has default User role');
+            }
           } 
           // Default to User
           else {
@@ -128,8 +143,9 @@ class DashboardScreenState extends State<DashboardScreen> {
             logger.i('User has default User role');
           }
           
+          // Fixed logger statement - now userData is accessible
           logger.i(
-            'Initial role set: $_currentRole, Organization: $_organization, IsDeveloper: $_isDeveloper, TechnicianDoc: ${technicianDoc.exists}, UserRole: ${userDoc.exists ? ((userDoc.data())?['role'] ?? 'N/A') : 'N/A'}',
+            'Initial role set: $_currentRole, Organization: $_organization, IsDeveloper: $_isDeveloper, TechnicianDoc: ${technicianDoc.exists}, UserRole: ${userDoc.exists ? (userData?['role'] ?? 'N/A') : 'N/A'}',
           );
         });
       }
@@ -164,9 +180,10 @@ class DashboardScreenState extends State<DashboardScreen> {
           
           setState(() {
             if (snapshot.exists) {
+              final data = snapshot.data();
               if (collection == 'Admins') {
                 _currentRole = 'Admin';
-                _organization = (snapshot.data())?['organization'] ?? '-';
+                _organization = data?['organization'] ?? '-';
                 logger.i('Role updated to Admin with organization: $_organization');
               } else if (collection == 'Developers') {
                 _isDeveloper = true;
@@ -177,7 +194,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                 // Only update to Technician if not already an Admin
                 if (_currentRole != 'Admin') {
                   _currentRole = 'Technician';
-                  _organization = (snapshot.data())?['organization'] ?? '-';
+                  _organization = data?['organization'] ?? '-';
                   logger.i('Role updated to Technician with organization: $_organization');
                 }
               }
@@ -187,25 +204,30 @@ class DashboardScreenState extends State<DashboardScreen> {
                 // If no longer a developer, check if still a technician or admin
                 if (_currentRole != 'Admin' && technicianDoc.exists) {
                   _currentRole = 'Technician';
-                  _organization = (technicianDoc.data())?['organization'] ?? '-';
+                  final techData = technicianDoc.data();
+                  _organization = techData?['organization'] ?? '-';
                   logger.i('No longer a Developer, but still a Technician with organization: $_organization');
                 } else if (_currentRole != 'Admin') {
                   // Check Users collection for technician role
                   FirebaseFirestore.instance.collection('Users').doc(uid).get().then((userDoc) {
-                    if (mounted && userDoc.exists && (userDoc.data())?['role'] == 'Technician') {
-                      setState(() {
-                        _currentRole = 'Technician';
-                        _organization = technicianDoc.exists && (technicianDoc.data())?['organization'] != null
-                            ? (technicianDoc.data() as Map<String, dynamic>)['organization']
-                            : '-';
-                        logger.i('Role updated to Technician from Users collection with organization: $_organization');
-                      });
-                    } else if (mounted && _currentRole != 'Admin') {
-                      setState(() {
-                        _currentRole = 'User';
-                        _organization = '-';
-                        logger.i('Role updated to default User');
-                      });
+                    if (mounted && userDoc.exists) {
+                      final userData = userDoc.data();
+                      if (userData?['role'] == 'Technician') {
+                        setState(() {
+                          _currentRole = 'Technician';
+                          final techData = technicianDoc.data();
+                          _organization = technicianDoc.exists && techData?['organization'] != null
+                              ? techData!['organization']
+                              : '-';
+                          logger.i('Role updated to Technician from Users collection with organization: $_organization');
+                        });
+                      } else if (mounted && _currentRole != 'Admin') {
+                        setState(() {
+                          _currentRole = 'User';
+                          _organization = '-';
+                          logger.i('Role updated to default User');
+                        });
+                      }
                     }
                   });
                 }
@@ -216,18 +238,21 @@ class DashboardScreenState extends State<DashboardScreen> {
               } else if (collection == 'Technicians' && _currentRole == 'Technician' && !_isDeveloper) {
                 // If technician document was deleted and not a developer, check user role
                 FirebaseFirestore.instance.collection('Users').doc(uid).get().then((userDoc) {
-                  if (mounted && userDoc.exists && (userDoc.data())?['role'] == 'Technician') {
-                    setState(() {
-                      _currentRole = 'Technician';
-                      _organization = '-';
-                      logger.i('Technician document removed but still has Technician role in Users');
-                    });
-                  } else if (mounted) {
-                    setState(() {
-                      _currentRole = 'User';
-                      _organization = '-';
-                      logger.i('Technician document removed, role updated to User');
-                    });
+                  if (mounted && userDoc.exists) {
+                    final userData = userDoc.data();
+                    if (userData?['role'] == 'Technician') {
+                      setState(() {
+                        _currentRole = 'Technician';
+                        _organization = '-';
+                        logger.i('Technician document removed but still has Technician role in Users');
+                      });
+                    } else if (mounted) {
+                      setState(() {
+                        _currentRole = 'User';
+                        _organization = '-';
+                        logger.i('Technician document removed, role updated to User');
+                      });
+                    }
                   }
                 });
               }
@@ -242,13 +267,15 @@ class DashboardScreenState extends State<DashboardScreen> {
 
     FirebaseFirestore.instance.collection('Users').doc(uid).snapshots().listen((snapshot) async {
       if (mounted && snapshot.exists) {
-        final role = (snapshot.data())?['role'] ?? '-';
+        final userData = snapshot.data();
+        final role = userData?['role'] ?? '-';
         if (role == 'Technician' && _currentRole != 'Admin' && !_isDeveloper) {
           final techDoc = await FirebaseFirestore.instance.collection('Technicians').doc(uid).get();
           setState(() {
             _currentRole = 'Technician';
-            _organization = techDoc.exists && (techDoc.data())?['organization'] != null
-                ? (techDoc.data() as Map<String, dynamic>)['organization']
+            final techData = techDoc.data();
+            _organization = techDoc.exists && techData?['organization'] != null
+                ? techData!['organization']
                 : '-';
           });
           logger.i('Users collection updated role to Technician, Organization: $_organization');
@@ -295,10 +322,17 @@ class DashboardScreenState extends State<DashboardScreen> {
             _organization = 'JV Almacis';
           } else if (technicianDoc.exists) {
             _currentRole = 'Technician';
-            _organization = (technicianDoc.data())?['organization'] ?? '-';
-          } else if (userDoc.exists && (userDoc.data())?['role'] == 'Technician') {
-            _currentRole = 'Technician';
-            _organization = '-';
+            final techData = technicianDoc.data();
+            _organization = techData?['organization'] ?? '-';
+          } else if (userDoc.exists) {
+            final userData = userDoc.data();
+            if (userData?['role'] == 'Technician') {
+              _currentRole = 'Technician';
+              _organization = '-';
+            } else {
+              _currentRole = 'User';
+              _organization = '-';
+            }
           } else {
             _currentRole = 'User';
             _organization = '-';
@@ -548,16 +582,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                       tooltip: 'Assign Technician Role',
                     ),
                   ),
-                // Add logout button for web
-                if (kIsWeb)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: IconButton(
-                      icon: const Icon(Icons.logout, color: Colors.white, size: 40),
-                      onPressed: _showLogoutConfirmation,
-                      tooltip: 'Logout',
-                    ),
-                  ),
+                // Logout button removed from web versions - only available in settings
               ],
               elevation: 0,
             ),
@@ -585,45 +610,59 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _showLogoutConfirmation() {
-  showDialog(
-    context: context,
-    builder: (BuildContext dialogContext) {
-      return AlertDialog(
-        title: Text('Confirm Logout', style: GoogleFonts.poppins()),
-        content: Text('Are you sure you want to logout?', style: GoogleFonts.poppins()),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text('Cancel', style: GoogleFonts.poppins()),
+    // Web platforms might need special handling for logout
+    const bool isWebPlatform = kIsWeb;
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text('Confirm Logout', style: GoogleFonts.poppins()),
+          content: Text(
+            isWebPlatform 
+                ? 'Are you sure you want to logout? This will end your web session.'
+                : 'Are you sure you want to logout?', 
+            style: GoogleFonts.poppins()
           ),
-          TextButton(
-            onPressed: () {
-              // Close the dialog first
-              Navigator.of(dialogContext).pop();
-              
-              // Create a separate method for logout to avoid async gap
-              _performLogout();
-            },
-            child: Text('Logout', style: GoogleFonts.poppins(color: Colors.red)),
-          ),
-        ],
-      );
-    },
-  );
-}
-
-// New method to handle the async logout operation
-Future<void> _performLogout() async {
-  await FirebaseAuth.instance.signOut();
-  
-  // Check if the widget is still mounted before using context
-  if (mounted) {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginScreen()),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text('Cancel', style: GoogleFonts.poppins()),
+            ),
+            TextButton(
+              onPressed: () {
+                // Close the dialog first
+                Navigator.of(dialogContext).pop();
+                
+                // Create a separate method for logout to avoid async gap
+                _performLogout();
+              },
+              child: Text('Logout', style: GoogleFonts.poppins(color: Colors.red)),
+            ),
+          ],
+        );
+      },
     );
   }
-}
+
+  // New method to handle the async logout operation
+  Future<void> _performLogout() async {
+    // Web platforms might need special handling for Firebase Auth
+    if (kIsWeb) {
+      logger.i('Performing web-specific logout');
+      // For web, we might need to clear any web-specific storage or state
+    }
+    
+    await FirebaseAuth.instance.signOut();
+    
+    // Check if the widget is still mounted before using context
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+      );
+    }
+  }
 
   Widget _buildMainContent() {
     if (_selectedFacilityId == null) {
