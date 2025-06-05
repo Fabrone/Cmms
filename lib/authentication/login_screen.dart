@@ -87,10 +87,12 @@ class LoginScreenState extends State<LoginScreen> {
           .collection('Users')
           .doc(user.uid)
           .get();
-      // Fix: Cast the data to Map<String, dynamic> to access fields
-      if (userDoc.exists && (userDoc.data() as Map<String, dynamic>?)?['role'] == 'Technician') {
-        setState(() => _userRole = 'Technician');
-        return;
+      if (userDoc.exists) {
+        final userData = userDoc.data() as Map<String, dynamic>?;
+        if (userData?['role'] == 'Technician') {
+          setState(() => _userRole = 'Technician');
+          return;
+        }
       }
 
       setState(() => _userRole = 'User');

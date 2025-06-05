@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/models/facility.dart';
+import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 
 class LocationsScreen extends StatefulWidget {
   final String facilityId;
@@ -90,24 +91,10 @@ class _LocationsScreenState extends State<LocationsScreen> {
 
     return ScaffoldMessenger(
       key: _messengerKey,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            'Facility Locations',
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: isMobile ? 20 : 24,
-            ),
-          ),
-          backgroundColor: Colors.blueGrey[800],
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () => Navigator.pop(context),
-          ),
-          elevation: 0,
-        ),
-        body: _isLoading
+      child: ResponsiveScreenWrapper(
+        title: 'Facility Locations',
+        facilityId: widget.facilityId,
+        child: _isLoading
             ? const Center(child: CircularProgressIndicator())
             : _buildContent(isMobile),
       ),
