@@ -4,7 +4,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/models/facility.dart';
-import 'package:cmms/screens/dashboard_screen.dart';
 
 class FacilityScreen extends StatefulWidget {
   final String? selectedFacilityId;
@@ -83,245 +82,285 @@ class FacilityScreenState extends State<FacilityScreen> {
     }
   }
 
-  void _navigateBackToDashboard() {
-    // Navigate back to dashboard with menu opened
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => DashboardScreen(
-          facilityId: widget.selectedFacilityId ?? '',
-          role: 'User', // This will be updated by the dashboard
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth <= 600;
+    final isDesktop = screenWidth > 1200;
+    
+    // Calculate content width - 60% for desktop, full width for mobile/tablet
+    final contentWidth = isDesktop ? screenWidth * 0.6 : screenWidth;
 
     return ScaffoldMessenger(
       key: _messengerKey,
       child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            'Your Facilities',
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: isMobile ? 20 : 24,
-            ),
-          ),
-          backgroundColor: Colors.blueGrey[800],
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: _navigateBackToDashboard,
-          ),
-          elevation: 0,
-        ),
         body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Your Facilities',
-                  style: GoogleFonts.poppins(
-                    fontSize: isMobile ? 20 : 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blueGrey[800],
+          child: Center(
+            child: Container(
+              width: contentWidth,
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header section
+                  Text(
+                    'Your Facilities',
+                    style: GoogleFonts.poppins(
+                      fontSize: isMobile ? 20 : 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey[800],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Select a facility to manage its maintenance tasks',
-                  style: GoogleFonts.poppins(
-                    fontSize: isMobile ? 14 : 16,
-                    color: Colors.blueGrey[600],
+                  const SizedBox(height: 8),
+                  Text(
+                    'Select a facility to manage its maintenance tasks',
+                    style: GoogleFonts.poppins(
+                      fontSize: isMobile ? 14 : 16,
+                      color: Colors.blueGrey[600],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance.collection('Facilities').orderBy('createdAt', descending: true).snapshots(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator(color: Colors.blueGrey));
-                      }
-                      if (snapshot.hasError) {
-                        logger.e('Firestore error: ${snapshot.error}');
-                        return Center(
-                          child: Text('Error: ${snapshot.error}', style: GoogleFonts.poppins(color: Colors.red)),
-                        );
-                      }
-                      final docs = snapshot.data?.docs ?? [];
-                      if (docs.isEmpty && !_isAddingFacility) {
-                        return Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.business, size: 64, color: Colors.blueGrey[300]),
-                              const SizedBox(height: 16),
-                              Text(
-                                'No facilities added yet',
-                                style: GoogleFonts.poppins(
-                                  fontSize: isMobile ? 16 : 18,
-                                  color: Colors.blueGrey[600],
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Click the + button to add a new facility',
-                                style: GoogleFonts.poppins(
-                                  fontSize: isMobile ? 14 : 16,
-                                  color: Colors.blueGrey[400],
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                      if (_isAddingFacility) {
-                        return Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Form(
-                            key: _formKey,
+                  const SizedBox(height: 16),
+                  
+                  // Main content area
+                  Expanded(
+                    child: StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection('Facilities')
+                          .orderBy('createdAt', descending: true)
+                          .snapshots(),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const Center(
+                            child: CircularProgressIndicator(color: Colors.blueGrey),
+                          );
+                        }
+                        
+                        if (snapshot.hasError) {
+                          logger.e('Firestore error: ${snapshot.error}');
+                          return Center(
+                            child: Text(
+                              'Error: ${snapshot.error}',
+                              style: GoogleFonts.poppins(color: Colors.red),
+                            ),
+                          );
+                        }
+                        
+                        final docs = snapshot.data?.docs ?? [];
+                        
+                        // Show empty state when no facilities and not adding
+                        if (docs.isEmpty && !_isAddingFacility) {
+                          return Center(
                             child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                TextFormField(
-                                  controller: _nameController,
-                                  decoration: InputDecoration(
-                                    labelText: 'Facility Name *',
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                    labelStyle: GoogleFonts.poppins(),
-                                  ),
-                                  style: GoogleFonts.poppins(),
-                                  validator: (value) => value!.isEmpty ? 'Enter facility name' : null,
-                                ),
-                                const SizedBox(height: 12),
-                                TextFormField(
-                                  controller: _locationController,
-                                  decoration: InputDecoration(
-                                    labelText: 'Location (optional)',
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                    labelStyle: GoogleFonts.poppins(),
-                                  ),
-                                  style: GoogleFonts.poppins(),
-                                ),
-                                const SizedBox(height: 12),
-                                TextFormField(
-                                  controller: _addressController,
-                                  decoration: InputDecoration(
-                                    labelText: 'Address (optional)',
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                    labelStyle: GoogleFonts.poppins(),
-                                  ),
-                                  style: GoogleFonts.poppins(),
+                                Icon(
+                                  Icons.business,
+                                  size: 64,
+                                  color: Colors.blueGrey[300],
                                 ),
                                 const SizedBox(height: 16),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    TextButton(
-                                      onPressed: () {
-                                        setState(() {
-                                          _isAddingFacility = false;
-                                        });
-                                        _nameController.clear();
-                                        _locationController.clear();
-                                        _addressController.clear();
-                                      },
-                                      child: Text('Cancel', style: GoogleFonts.poppins()),
-                                    ),
-                                    ElevatedButton(
-                                      onPressed: _addFacility,
-                                      style: ElevatedButton.styleFrom(
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                        backgroundColor: Colors.blueGrey,
-                                      ),
-                                      child: Text('Add', style: GoogleFonts.poppins(color: Colors.white)),
-                                    ),
-                                  ],
+                                Text(
+                                  'No facilities added yet',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: isMobile ? 16 : 18,
+                                    color: Colors.blueGrey[600],
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Click the + button to add a new facility',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: isMobile ? 14 : 16,
+                                    color: Colors.blueGrey[400],
+                                  ),
                                 ),
                               ],
                             ),
-                          ),
-                        );
-                      }
-                      final facilities = docs.map((doc) => Facility.fromFirestore(doc)).toList();
-                      logger.i('Fetched ${facilities.length} facilities from Firestore');
-
-                      return ListView.builder(
-                        itemCount: facilities.length,
-                        itemBuilder: (context, index) {
-                          final facility = facilities[index];
-                          final isSelected = facility.id == widget.selectedFacilityId;
-                          final isInteractable = widget.isSelectionActive || isSelected;
-
-                          return GestureDetector(
-                            onTap: isInteractable
-                                ? () {
-                                    widget.onFacilitySelected(facility.id);
-                                    logger.i('Selected facility: ${facility.name}, ID: ${facility.id}');
-                                  }
-                                : null,
-                            child: Card(
-                              elevation: isSelected ? 6 : 2,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              color: isSelected ? Colors.blueGrey[50] : isInteractable ? Colors.white : Colors.grey[200],
-                              margin: const EdgeInsets.symmetric(vertical: 8),
-                              child: Padding(
-                                padding: const EdgeInsets.all(16.0),
+                          );
+                        }
+                        
+                        // Show add facility form
+                        if (_isAddingFacility) {
+                          return SingleChildScrollView(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Form(
+                                key: _formKey,
                                 child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      facility.name,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: isMobile ? 16 : 18,
-                                        fontWeight: FontWeight.bold,
-                                        color: isInteractable ? Colors.blueGrey[800] : Colors.grey[600],
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      facility.location,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: isMobile ? 14 : 16,
-                                        color: isInteractable ? Colors.blueGrey[600] : Colors.grey[500],
-                                      ),
-                                    ),
-                                    if (facility.address != null) ...[
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        facility.address!,
-                                        style: GoogleFonts.poppins(
-                                          fontSize: isMobile ? 12 : 14,
-                                          color: isInteractable ? Colors.blueGrey[500] : Colors.grey[400],
+                                    TextFormField(
+                                      controller: _nameController,
+                                      decoration: InputDecoration(
+                                        labelText: 'Facility Name *',
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
                                         ),
+                                        labelStyle: GoogleFonts.poppins(),
                                       ),
-                                    ],
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Added: ${facility.createdAt.toLocal().toString().split(' ')[0]}',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: isMobile ? 12 : 14,
-                                        color: isInteractable ? Colors.blueGrey[400] : Colors.grey[400],
+                                      style: GoogleFonts.poppins(),
+                                      validator: (value) => value!.isEmpty 
+                                          ? 'Enter facility name' 
+                                          : null,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    TextFormField(
+                                      controller: _locationController,
+                                      decoration: InputDecoration(
+                                        labelText: 'Location (optional)',
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        labelStyle: GoogleFonts.poppins(),
                                       ),
+                                      style: GoogleFonts.poppins(),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    TextFormField(
+                                      controller: _addressController,
+                                      decoration: InputDecoration(
+                                        labelText: 'Address (optional)',
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        labelStyle: GoogleFonts.poppins(),
+                                      ),
+                                      style: GoogleFonts.poppins(),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        TextButton(
+                                          onPressed: () {
+                                            setState(() {
+                                              _isAddingFacility = false;
+                                            });
+                                            _nameController.clear();
+                                            _locationController.clear();
+                                            _addressController.clear();
+                                          },
+                                          child: Text(
+                                            'Cancel',
+                                            style: GoogleFonts.poppins(),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        ElevatedButton(
+                                          onPressed: _addFacility,
+                                          style: ElevatedButton.styleFrom(
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            backgroundColor: Colors.blueGrey,
+                                          ),
+                                          child: Text(
+                                            'Add',
+                                            style: GoogleFonts.poppins(
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
                               ),
                             ),
                           );
-                        },
-                      );
-                    },
+                        }
+                        
+                        // Show facilities list
+                        final facilities = docs
+                            .map((doc) => Facility.fromFirestore(doc))
+                            .toList();
+                        logger.i('Fetched ${facilities.length} facilities from Firestore');
+
+                        return ListView.builder(
+                          itemCount: facilities.length,
+                          itemBuilder: (context, index) {
+                            final facility = facilities[index];
+                            final isSelected = facility.id == widget.selectedFacilityId;
+                            final isInteractable = widget.isSelectionActive || isSelected;
+
+                            return GestureDetector(
+                              onTap: isInteractable
+                                  ? () {
+                                      widget.onFacilitySelected(facility.id);
+                                      logger.i(
+                                        'Selected facility: ${facility.name}, ID: ${facility.id}',
+                                      );
+                                    }
+                                  : null,
+                              child: Card(
+                                elevation: isSelected ? 6 : 2,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                color: isSelected
+                                    ? Colors.blueGrey[50]
+                                    : isInteractable
+                                        ? Colors.white
+                                        : Colors.grey[200],
+                                margin: const EdgeInsets.symmetric(vertical: 8),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        facility.name,
+                                        style: GoogleFonts.poppins(
+                                          fontSize: isMobile ? 16 : 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: isInteractable
+                                              ? Colors.blueGrey[800]
+                                              : Colors.grey[600],
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        facility.location,
+                                        style: GoogleFonts.poppins(
+                                          fontSize: isMobile ? 14 : 16,
+                                          color: isInteractable
+                                              ? Colors.blueGrey[600]
+                                              : Colors.grey[500],
+                                        ),
+                                      ),
+                                      if (facility.address != null) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          facility.address!,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: isMobile ? 12 : 14,
+                                            color: isInteractable
+                                                ? Colors.blueGrey[500]
+                                                : Colors.grey[400],
+                                          ),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Added: ${facility.createdAt.toLocal().toString().split(' ')[0]}',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: isMobile ? 12 : 14,
+                                          color: isInteractable
+                                              ? Colors.blueGrey[400]
+                                              : Colors.grey[400],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -335,10 +374,15 @@ class FacilityScreenState extends State<FacilityScreen> {
           icon: const Icon(Icons.add, color: Colors.white),
           label: Text(
             'Add Facility',
-            style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600),
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           elevation: 8,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
     );
