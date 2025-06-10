@@ -459,7 +459,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                         color: Colors.white, 
                         size: 28,
                       ),
-                      onPressed: _handleBackNavigation, // Use the new method
+                      onPressed: _handleBackNavigation,
                       tooltip: 'Back',
                     )
                   : (!isTabletOrWeb && isFacilitySelected
@@ -473,31 +473,46 @@ class DashboardScreenState extends State<DashboardScreen> {
                           ),
                         )
                       : null),
-              title: Text(
-                isFacilitySelected 
-                    ? '$displayRole Dashboard${_organization != '-' ? ' ($_organization)' : ''}'
-                    : 'Select Facility',
-                style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  fontSize: 24,
-                ),
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        _currentRole == 'Admin' 
+                            ? Icons.admin_panel_settings
+                            : _currentRole == 'Technician'
+                                ? Icons.engineering
+                                : Icons.person,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        isFacilitySelected 
+                            ? '$displayRole Dashboard'
+                            : 'Select Facility',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 24,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (isFacilitySelected && _organization != '-')
+                    Text(
+                      _organization,
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.normal,
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
+                    ),
+                ],
               ),
               backgroundColor: Colors.blueGrey,
               actions: [
-                // Show role indicator
-                Padding(
-                  padding: const EdgeInsets.only(right: 16.0),
-                  child: Center(
-                    child: Text(
-                      _currentRole,
-                      style: GoogleFonts.poppins(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
                 // Admin-specific actions
                 if (_currentRole == 'Admin' && isFacilitySelected)
                   Padding(
@@ -615,39 +630,6 @@ class DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         children: [
           _buildAppIcon(),
-          // Role indicator
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-            margin: const EdgeInsets.only(bottom: 8),
-            decoration: BoxDecoration(
-              color: Colors.blueGrey[100],
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  _currentRole == 'Admin' 
-                      ? Icons.admin_panel_settings
-                      : _currentRole == 'Technician'
-                          ? Icons.engineering
-                          : Icons.person,
-                  color: Colors.blueGrey[800],
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '$_currentRole${_organization != '-' ? ' ($_organization)' : ''}',
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey[800],
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
           Expanded(child: ListView(children: _buildMenuItems())),
         ],
       ),
@@ -661,39 +643,6 @@ class DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         children: [
           _buildAppIcon(),
-          // Role indicator
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.blueGrey[100],
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  _currentRole == 'Admin' 
-                      ? Icons.admin_panel_settings
-                      : _currentRole == 'Technician'
-                          ? Icons.engineering
-                          : Icons.person,
-                  color: Colors.blueGrey[800],
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '$_currentRole${_organization != '-' ? ' ($_organization)' : ''}',
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey[800],
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
           Expanded(
             child: ListView(
               children: _buildMenuItems(),
