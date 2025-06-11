@@ -35,6 +35,9 @@ dependencies:
   cloud_functions: ^5.5.0
   connectivity_plus: ^6.1.4
   shared_preferences: ^2.5.3
+  geocoding: ^4.0.0
+  google_maps_flutter: ^2.12.2
+  geolocator: ^14.0.1
 
 flutter:
   assets:
