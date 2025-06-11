@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cmms/models/documentations.dart';
+import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -28,8 +29,9 @@ class _DocumentationsScreenState extends State<DocumentationsScreen> {
   final logger = Logger(printer: PrettyPrinter());
   final TextEditingController _titleController = TextEditingController();
   double? _uploadProgress;
-  final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
   String _selectedCategory = 'Building Information';
+  String _currentRole = 'User';
+  String _organization = '-';
 
   static const Map<String, String> documentCategories = {
     'Building Information': 'Building Information',
@@ -47,12 +49,98 @@ class _DocumentationsScreenState extends State<DocumentationsScreen> {
   void initState() {
     super.initState();
     logger.i('DocumentationsScreen initialized with facilityId: ${widget.facilityId}');
+    _getCurrentUserRole();
   }
 
   @override
   void dispose() {
     _titleController.dispose();
     super.dispose();
+  }
+
+  Future<void> _getCurrentUserRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
+      final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
+      final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance.collection('Users').doc(user.uid).get();
+      
+      String newRole = 'User';
+      String newOrg = '-';
+      
+      if (adminDoc.exists) {
+        newRole = 'Admin';
+        final adminData = adminDoc.data();
+        newOrg = adminData?['organization'] ?? '-';
+      } 
+      else if (developerDoc.exists) {
+        newRole = 'Technician';
+        newOrg = 'JV Almacis';
+      }
+      else if (technicianDoc.exists) {
+        newRole = 'Technician';
+        final techData = technicianDoc.data();
+        newOrg = techData?['organization'] ?? '-';
+      }
+      else if (userDoc.exists) {
+        final userData = userDoc.data();
+        if (userData != null && userData['role'] == 'Technician') {
+          newRole = 'Technician';
+          newOrg = '-';
+        } else {
+          newRole = 'User';
+          newOrg = '-';
+        }
+      }
+      
+      if (mounted) {
+        setState(() {
+          _currentRole = newRole;
+          _organization = newOrg;
+        });
+      }
+    } catch (e) {
+      logger.e('Error getting user role: $e');
+    }
+  }
+
+  Future<void> _showUploadDialog() async {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Upload Documentation', style: GoogleFonts.poppins()),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildTextField(16.0),
+              const SizedBox(height: 12),
+              _buildCategoryDropdown(16.0),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.poppins()),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _uploadDocument();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blueGrey[800],
+              foregroundColor: Colors.white,
+            ),
+            child: Text('Upload File', style: GoogleFonts.poppins()),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _uploadDocument() async {
@@ -374,208 +462,157 @@ class _DocumentationsScreenState extends State<DocumentationsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return ResponsiveScreenWrapper(
+      title: 'Documentations',
+      facilityId: widget.facilityId,
+      currentRole: _currentRole,
+      organization: _organization,
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showUploadDialog,
+        backgroundColor: Colors.blueGrey[800],
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
+      child: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth <= 600;
     final isTablet = screenWidth > 600 && screenWidth <= 900;
     final padding = isMobile ? 16.0 : isTablet ? 24.0 : 32.0;
     final fontSizeTitle = isMobile ? 20.0 : isTablet ? 24.0 : 28.0;
     final fontSizeSubtitle = isMobile ? 14.0 : isTablet ? 16.0 : 18.0;
-    final inputFontSize = isMobile ? 14.0 : 16.0;
 
-    return PopScope(
-      canPop: true,
-      child: ScaffoldMessenger(
-        key: _messengerKey,
-        child: Scaffold(
-          appBar: AppBar(
-            title: Text(
-              'Documentations',
-              style: GoogleFonts.poppins(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: fontSizeTitle,
-              ),
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(padding),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Uploaded Documents',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold,
+              fontSize: fontSizeTitle,
+              color: Colors.blueGrey[900],
             ),
-            backgroundColor: Colors.blueGrey[800],
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back, color: Colors.white),
-              onPressed: () => Navigator.pop(context),
-            ),
-            elevation: 0,
           ),
-          body: SafeArea(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.all(padding),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Upload Documentation',
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.bold,
-                      fontSize: fontSizeTitle,
-                      color: Colors.blueGrey[900],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  isMobile
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _buildTextField(inputFontSize),
-                            const SizedBox(height: 12),
-                            _buildCategoryDropdown(inputFontSize),
-                            const SizedBox(height: 12),
-                            _buildUploadButton(inputFontSize),
-                          ],
-                        )
-                      : Row(
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: _buildTextField(inputFontSize),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              flex: 2,
-                              child: _buildCategoryDropdown(inputFontSize),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              flex: 1,
-                              child: _buildUploadButton(inputFontSize),
-                            ),
-                          ],
+          const SizedBox(height: 16),
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('Documentations')
+                .where('facilityId', isEqualTo: widget.facilityId)
+                .orderBy('uploadedAt', descending: true)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                logger.e('StreamBuilder error: ${snapshot.error}');
+                return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
+              }
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final docs = snapshot.data?.docs ?? [];
+              if (docs.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Text('No documents uploaded yet', style: GoogleFonts.poppins()),
+                );
+              }
+              return ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: docs.length,
+                itemBuilder: (context, index) {
+                  final documentation = Documentation.fromSnapshot(docs[index]);
+                  return Card(
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    child: ListTile(
+                      leading: Icon(
+                        _getFileIcon(documentation.fileName),
+                        color: _getFileIconColor(documentation.fileName),
+                        size: isMobile ? 32 : 36,
+                      ),
+                      title: Text(
+                        documentation.title,
+                        style: GoogleFonts.poppins(
+                          color: Colors.blueGrey[900],
+                          fontWeight: FontWeight.w500,
+                          fontSize: fontSizeSubtitle,
                         ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'Uploaded Documents',
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.bold,
-                      fontSize: fontSizeTitle,
-                      color: Colors.blueGrey[900],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('Documentations')
-                        .where('facilityId', isEqualTo: widget.facilityId)
-                        .orderBy('uploadedAt', descending: true)
-                        .snapshots(),
-                    builder: (context, snapshot) {
-                      if (snapshot.hasError) {
-                        logger.e('StreamBuilder error: ${snapshot.error}');
-                        return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
-                      }
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      final docs = snapshot.data?.docs ?? [];
-                      if (docs.isEmpty) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8.0),
-                          child: Text('No documents uploaded yet', style: GoogleFonts.poppins()),
-                        );
-                      }
-                      return ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: docs.length,
-                        itemBuilder: (context, index) {
-                          final documentation = Documentation.fromSnapshot(docs[index]);
-                          return Card(
-                            elevation: 2,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            margin: const EdgeInsets.symmetric(vertical: 6),
-                            child: ListTile(
-                              leading: Icon(
-                                _getFileIcon(documentation.fileName),
-                                color: _getFileIconColor(documentation.fileName),
-                                size: isMobile ? 32 : 36,
-                              ),
-                              title: Text(
-                                documentation.title,
-                                style: GoogleFonts.poppins(
-                                  color: Colors.blueGrey[900],
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: fontSizeSubtitle,
-                                ),
-                              ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Category: ${documentation.category}',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: isMobile ? 12 : 14,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                  Text(
-                                    'Uploaded: ${documentation.uploadedAt != null ? DateFormat('MMM dd, yyyy').format(documentation.uploadedAt!) : 'Unknown date'}',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: isMobile ? 12 : 14,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              trailing: PopupMenuButton<String>(
-                                onSelected: (value) {
-                                  if (value == 'view') {
-                                    _viewDocument(documentation.downloadUrl, documentation.fileName);
-                                  } else if (value == 'download') {
-                                    _downloadDocument(documentation.downloadUrl, documentation.fileName);
-                                  } else if (value == 'delete') {
-                                    _deleteDocument(documentation.downloadUrl, documentation.fileName, documentation.id);
-                                  }
-                                },
-                                itemBuilder: (context) => [
-                                  PopupMenuItem(
-                                    value: 'view',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.visibility, color: Colors.blue[700], size: 20),
-                                        const SizedBox(width: 8),
-                                        Text('View', style: GoogleFonts.poppins()),
-                                      ],
-                                    ),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'download',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.download, color: Colors.green[700], size: 20),
-                                        const SizedBox(width: 8),
-                                        Text('Download', style: GoogleFonts.poppins()),
-                                      ],
-                                    ),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'delete',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.delete, color: Colors.red[700], size: 20),
-                                        const SizedBox(width: 8),
-                                        Text('Delete', style: GoogleFonts.poppins()),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                                icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
-                              ),
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Category: ${documentation.category}',
+                            style: GoogleFonts.poppins(
+                              fontSize: isMobile ? 12 : 14,
+                              color: Colors.grey[600],
                             ),
-                          );
+                          ),
+                          Text(
+                            'Uploaded: ${documentation.uploadedAt != null ? DateFormat('MMM dd, yyyy').format(documentation.uploadedAt!) : 'Unknown date'}',
+                            style: GoogleFonts.poppins(
+                              fontSize: isMobile ? 12 : 14,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (value) {
+                          if (value == 'view') {
+                            _viewDocument(documentation.downloadUrl, documentation.fileName);
+                          } else if (value == 'download') {
+                            _downloadDocument(documentation.downloadUrl, documentation.fileName);
+                          } else if (value == 'delete') {
+                            _deleteDocument(documentation.downloadUrl, documentation.fileName, documentation.id);
+                          }
                         },
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
+                        itemBuilder: (context) => [
+                          PopupMenuItem(
+                            value: 'view',
+                            child: Row(
+                              children: [
+                                Icon(Icons.visibility, color: Colors.blue[700], size: 20),
+                                const SizedBox(width: 8),
+                                Text('View', style: GoogleFonts.poppins()),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'download',
+                            child: Row(
+                              children: [
+                                Icon(Icons.download, color: Colors.green[700], size: 20),
+                                const SizedBox(width: 8),
+                                Text('Download', style: GoogleFonts.poppins()),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(Icons.delete, color: Colors.red[700], size: 20),
+                                const SizedBox(width: 8),
+                                Text('Delete', style: GoogleFonts.poppins()),
+                              ],
+                            ),
+                          ),
+                        ],
+                        icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
           ),
-        ),
+        ],
       ),
     );
   }
@@ -636,24 +673,6 @@ class _DocumentationsScreenState extends State<DocumentationsScreen> {
         });
       },
       style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.black),
-    );
-  }
-
-  Widget _buildUploadButton(double fontSize) {
-    return ElevatedButton.icon(
-      onPressed: _uploadDocument,
-      icon: const Icon(Icons.upload_file, color: Colors.white),
-      label: Text(
-        'Upload File',
-        style: GoogleFonts.poppins(color: Colors.white, fontSize: fontSize),
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.blueGrey[800],
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 2,
-      ),
     );
   }
 }
