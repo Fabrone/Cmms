@@ -1,33 +1,32 @@
-import 'package:cmms/developer/developer_screen.dart';
-import 'package:cmms/display%20screens/billing_screen.dart';
-import 'package:cmms/display%20screens/building_survey_screen.dart';
-import 'package:cmms/display%20screens/documentations_screen.dart';
-import 'package:cmms/display%20screens/drawings_screen.dart';
-import 'package:cmms/display%20screens/equipment_supplied_screen.dart';
+//import 'package:cmms/display%20screens/locations_screen.dart';
+import 'package:cmms/display%20screens/role_assignment_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+//import 'package:cmms/developer/developer_screen.dart';
+//import 'package:cmms/display%20screens/billing_screen.dart';
+//import 'package:cmms/display%20screens/building_survey_screen.dart';
+//import 'package:cmms/display%20screens/documentations_screen.dart';
+//import 'package:cmms/display%20screens/drawings_screen.dart';
+//import 'package:cmms/display%20screens/equipment_supplied_screen.dart';
 import 'package:cmms/display%20screens/facility_screen.dart';
-import 'package:cmms/display%20screens/inventory_screen.dart';
-import 'package:cmms/display%20screens/kpi_screen.dart';
-import 'package:cmms/display%20screens/locations_screen.dart';
-import 'package:cmms/display%20screens/price_list_screen.dart';
+//import 'package:cmms/display%20screens/inventory_screen.dart';
+//import 'package:cmms/display%20screens/kpi_screen.dart';
+/*import 'package:cmms/display%20screens/price_list_screen.dart';
 import 'package:cmms/display%20screens/report_screen.dart';
 import 'package:cmms/display%20screens/reports_screen.dart';
 import 'package:cmms/display%20screens/request_screen.dart';
-import 'package:cmms/display%20screens/role_assignment_screen.dart';
 import 'package:cmms/display%20screens/schedule_maintenance_screen.dart';
 import 'package:cmms/display%20screens/vendor_screen.dart';
 import 'package:cmms/display%20screens/work_order_screen.dart';
 import 'package:cmms/screens/user_screen.dart';
 import 'package:cmms/screens/settings_screen.dart';
-import 'package:cmms/technician/preventive_maintenance_screen.dart';
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:cmms/technician/preventive_maintenance_screen.dart';*/
+import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/authentication/login_screen.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-
-// Add this import at the top of the file
 import 'dart:async';
 
 class DashboardScreen extends StatefulWidget {
@@ -242,13 +241,6 @@ class DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  void _resetFacilitySelection() {
-    setState(() {
-      _selectedFacilityId = null;
-      _isFacilitySelectionActive = true;
-    });
-    logger.i('Reset facility selection');
-  }
 
   void _refreshFacilitiesView() {
     setState(() {
@@ -295,261 +287,77 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   // Define menu structure with main items and sub-items
-  final List<Map<String, dynamic>> _menuStructure = [
-    {
-      'title': 'Facilities',
-      'icon': Icons.business,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Locations',
-      'icon': Icons.location_on,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Building Survey',
-      'icon': Icons.account_balance,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Drawings',
-      'icon': Icons.brush,
-      'isSubItem': true, // Sub-item of Building Survey
-    },
-    {
-      'title': 'Documentations',
-      'icon': Icons.description,
-      'isSubItem': true, // Sub-item of Building Survey
-    },
-    {
-      'title': 'Schedule Maintenance',
-      'icon': Icons.event,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Preventive Maintenance',
-      'icon': Icons.build_circle,
-      'isSubItem': true, // Sub-item of Schedule Maintenance
-    },
-    {
-      'title': 'Reports',
-      'icon': Icons.bar_chart,
-      'isSubItem': true, // Sub-item of Schedule Maintenance
-    },
-    {
-      'title': 'Work on Request',
-      'icon': Icons.request_page,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Work Orders',
-      'icon': Icons.work,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Price Lists',
-      'icon': Icons.attach_money,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Billing',
-      'icon': Icons.receipt_long,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Equipment Supplied',
-      'icon': Icons.construction,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Inventory and Parts',
-      'icon': Icons.inventory,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Vendors',
-      'icon': Icons.store,
-      'isSubItem': false,
-    },
-    {
-      'title': 'KPIs',
-      'icon': Icons.trending_up,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Report',
-      'icon': Icons.bar_chart,
-      'isSubItem': false,
-    },
-    {
-      'title': 'Settings',
-      'icon': Icons.settings,
-      'isSubItem': false,
-    },
-  ];
 
-  // Role-specific menu items
-  final Map<String, Map<String, List<String>>> _roleMenuAccess = {
-    'Admin': {
-      'Embassy': [
-        'Facilities', 'Locations', 'Building Survey', 'Drawings', 'Documentations',
-        'Schedule Maintenance', 'Preventive Maintenance', 'Reports', 'Work on Request',
-        'Work Orders', 'Billing', 'Report', 'Settings'
-      ],
-      'JV Almacis': [
-        'Facilities', 'Locations', 'Building Survey', 'Drawings', 'Documentations',
-        'Schedule Maintenance', 'Preventive Maintenance', 'Reports', 'Price Lists',
-        'Work on Request', 'Work Orders', 'Equipment Supplied', 'Inventory and Parts',
-        'Vendors', 'Users', 'KPIs', 'Billing', 'Report', 'Settings'
-      ],
-    },
-    'Technician': {
-      'Embassy': [
-        'Facilities', 'Locations', 'Preventive Maintenance', 'Schedule Maintenance',
-        'Building Survey', 'Drawings', 'Documentations', 'Reports', 'Work on Request',
-        'Work Orders', 'Billing', 'Report', 'Settings'
-      ],
-      'JV Almacis': [
-        'Facilities', 'Locations', 'Preventive Maintenance', 'Schedule Maintenance',
-        'Building Survey', 'Drawings', 'Documentations', 'Reports', 'Price Lists',
-        'Work on Request', 'Work Orders', 'Equipment Supplied', 'Inventory and Parts',
-        'Billing', 'Report', 'Settings'
-      ],
-    },
-    'User': {
-      '-': [
-        'Facilities', 'Settings'
-      ],
-    },
-  };
+  // Role-specific menu items - UPDATED to remove Profile, About, Help & Support
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isTabletOrWeb = screenWidth > 600;
     final displayRole = _currentRole;
     final isFacilitySelected = _selectedFacilityId != null && _selectedFacilityId!.isNotEmpty;
 
-    return PopScope(
-      canPop: false, // Prevent accidental logout on web
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) {
-          if (isFacilitySelected) {
-            // Reset facility selection instead of popping
-            _resetFacilitySelection();
-          } else {
-            // Show confirmation dialog before logout
+    if (!isFacilitySelected) {
+      // When no facility is selected, use simple layout for facility selection
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, result) {
+          if (!didPop) {
             _showLogoutConfirmation();
           }
-        }
-      },
-      child: ScaffoldMessenger(
-        key: _messengerKey,
-        child: Scaffold(
-          key: _scaffoldKey,
-          extendBodyBehindAppBar: false,
-          appBar: PreferredSize(
-            preferredSize: const Size.fromHeight(80.0),
-            child: AppBar(
-              // Show back button when in facility selection mode, menu button when facility is selected
-              leading: _selectedFacilityId == null
-                  ? IconButton(
-                      icon: const Icon(
-                        Icons.arrow_back, 
-                        color: Colors.white, 
-                        size: 28,
-                      ),
-                      onPressed: _handleBackNavigation,
-                      tooltip: 'Back',
-                    )
-                  : (!isTabletOrWeb && isFacilitySelected
-                      ? Builder(
-                          builder: (context) => IconButton(
-                            icon: const Icon(Icons.menu, color: Colors.white, size: 40),
-                            onPressed: () {
-                              Scaffold.of(context).openDrawer();
-                            },
-                            tooltip: 'Open Menu',
-                          ),
-                        )
-                      : null),
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        _currentRole == 'Admin' 
-                            ? Icons.admin_panel_settings
-                            : _currentRole == 'Technician'
-                                ? Icons.engineering
-                                : Icons.person,
-                        color: Colors.white,
-                        size: 24,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        isFacilitySelected 
-                            ? '$displayRole Dashboard'
-                            : 'Select Facility',
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          fontSize: 24,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (isFacilitySelected && _organization != '-')
-                    Text(
-                      _organization,
-                      style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.normal,
-                        color: Colors.white70,
-                        fontSize: 14,
-                      ),
-                    ),
-                ],
+        },
+        child: ScaffoldMessenger(
+          key: _messengerKey,
+          child: Scaffold(
+            key: _scaffoldKey,
+            appBar: AppBar(
+              title: Text(
+                'Select Facility',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  fontSize: 24,
+                ),
               ),
               backgroundColor: Colors.blueGrey,
-              actions: [
-                // Admin-specific actions
-                if (_currentRole == 'Admin' && isFacilitySelected)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: IconButton(
-                      icon: const Icon(Icons.person_add, color: Colors.white, size: 40),
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => const RoleAssignmentScreen()),
-                        );
-                      },
-                      tooltip: 'Assign Technician Role',
-                    ),
-                  ),
-              ],
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
+                onPressed: _handleBackNavigation,
+                tooltip: 'Back',
+              ),
               elevation: 0,
             ),
-          ),
-          // Only show drawer on mobile when facility is selected
-          drawer: !isTabletOrWeb && isFacilitySelected ? _buildDrawer() : null,
-          body: Row(
-            children: [
-              // Show sidebar on tablet/web when facility is selected
-              if (isTabletOrWeb && isFacilitySelected) _buildSidebar(),
-              Expanded(
-                child: _selectedFacilityId == null
-                    ? FacilityScreen(
-                        selectedFacilityId: _selectedFacilityId,
-                        onFacilitySelected: _onFacilitySelected,
-                        isSelectionActive: _isFacilitySelectionActive,
-                      )
-                    : _buildMainContent(),
-              ),
-            ],
+            body: _buildMainContent(),
           ),
         ),
+      );
+    }
+
+    // When facility is selected, use the responsive wrapper
+    return ScaffoldMessenger(
+      key: _messengerKey,
+      child: ResponsiveScreenWrapper(
+        title: '$displayRole Dashboard',
+        facilityId: _selectedFacilityId!,
+        currentRole: _currentRole,
+        organization: _organization,
+        onFacilityReset: _refreshFacilitiesView,
+        actions: [
+          // Admin-specific actions
+          if (_currentRole == 'Admin')
+            Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: IconButton(
+                icon: const Icon(Icons.person_add, color: Colors.white),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const RoleAssignmentScreen()),
+                  );
+                },
+                tooltip: 'Assign Technician Role',
+              ),
+            ),
+        ],
+        child: _buildMainContent(),
       ),
     );
   }
@@ -609,232 +417,10 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildMainContent() {
-    if (_selectedFacilityId == null) {
-      return FacilityScreen(
-        selectedFacilityId: _selectedFacilityId,
-        onFacilitySelected: _onFacilitySelected,
-        isSelectionActive: _isFacilitySelectionActive,
-      );
-    }
-    
-    // Show facility screen content when facility is selected
     return FacilityScreen(
       selectedFacilityId: _selectedFacilityId,
       onFacilitySelected: _onFacilitySelected,
       isSelectionActive: _isFacilitySelectionActive,
     );
-  }
-
-  Widget _buildDrawer() {
-    return Drawer(
-      child: Column(
-        children: [
-          _buildAppIcon(),
-          Expanded(child: ListView(children: _buildMenuItems())),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSidebar() {
-    return Container(
-      width: 250,
-      color: Colors.blueGrey[50],
-      child: Column(
-        children: [
-          _buildAppIcon(),
-          Expanded(
-            child: ListView(
-              children: _buildMenuItems(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  List<Widget> _buildMenuItems() {
-    final role = _currentRole;
-    final org = _organization;
-    
-    // Get menu items based on role and organization
-    List<String> allowedItems = [];
-    
-    // First check if this specific role+org combination exists
-    if (_roleMenuAccess.containsKey(role) && _roleMenuAccess[role]!.containsKey(org)) {
-      allowedItems = _roleMenuAccess[role]![org]!;
-    } 
-    // If not found, try with default org '-'
-    else if (_roleMenuAccess.containsKey(role) && _roleMenuAccess[role]!.containsKey('-')) {
-      allowedItems = _roleMenuAccess[role]!['-']!;
-    }
-    // Fallback to User role with default org
-    else {
-      allowedItems = _roleMenuAccess['User']!['-']!;
-    }
-    
-    logger.i('Building menu items for role: $role, organization: $org, allowed items: ${allowedItems.length}');
-
-    final List<Widget> menuWidgets = [];
-    
-    for (var menuItem in _menuStructure) {
-      final title = menuItem['title'] as String;
-      
-      // Skip items not allowed for this role/organization
-      if (!allowedItems.contains(title)) {
-        continue;
-      }
-      
-      final icon = menuItem['icon'] as IconData;
-      final isSubItem = menuItem['isSubItem'] as bool;
-      
-      // Special handling for "Facilities" item
-      if (title == 'Facilities' && _selectedFacilityId != null) {
-        menuWidgets.add(
-          ListTile(
-            leading: Icon(icon, color: Colors.blueGrey),
-            title: Text(title, style: GoogleFonts.poppins()),
-            onTap: _refreshFacilitiesView,
-          ),
-        );
-        continue;
-      }
-      
-      menuWidgets.add(
-        ListTile(
-          contentPadding: isSubItem 
-              ? const EdgeInsets.only(left: 32.0, right: 16.0)
-              : null,
-          leading: Icon(icon, color: Colors.blueGrey),
-          title: Text(title, style: GoogleFonts.poppins()),
-          onTap: () => _handleMenuItemTap(title),
-        ),
-      );
-    }
-    
-    return menuWidgets;
-  }
-
-  Widget _buildAppIcon() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      child: GestureDetector(
-        onTap: _isDeveloper
-            ? () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const DeveloperScreen()),
-                );
-              }
-            : null,
-        child: Image.asset(
-          'assets/icons/icon.png',
-          width: 60,
-          height: 60,
-        ),
-      ),
-    );
-  }
-
-  void _handleMenuItemTap(String title) {
-    if (!mounted) return;
-
-    // Ensure we have a selected facility
-    if (_selectedFacilityId == null || _selectedFacilityId!.isEmpty) {
-      _messengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Please select a facility first. If no facilities are available, add a new one.',
-            style: GoogleFonts.poppins(),
-          ),
-        ),
-      );
-      return;
-    }
-
-    // Special handling for Settings - always accessible
-    if (title != 'Settings' && title != 'Facilities' && _currentRole == 'User') {
-      _messengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Text("Wait for Admin's role assignment to utilize the features", style: GoogleFonts.poppins()),
-        ),
-      );
-      return;
-    }
-
-    try {
-      if (mounted) {
-        // Close drawer if open on mobile
-        final screenWidth = MediaQuery.of(context).size.width;
-        final isMobile = screenWidth <= 600;
-        if (isMobile && Navigator.canPop(context)) {
-          Navigator.pop(context);
-        }
-
-        final screenMap = {
-          'Facilities': () {
-            // Refresh/reopen dashboard with facilities list
-            _refreshFacilitiesView();
-            return null; // Return null to indicate no navigation needed
-          },
-          'Locations': () => LocationsScreen(facilityId: _selectedFacilityId!),
-          'Building Survey': () => BuildingSurveyScreen(facilityId: _selectedFacilityId!, selectedSubSection: ''),
-          'Documentations': () => DocumentationsScreen(facilityId: _selectedFacilityId!),
-          'Drawings': () => DrawingsScreen(facilityId: _selectedFacilityId!),
-          'Schedule Maintenance': () => ScheduleMaintenanceScreen(facilityId: _selectedFacilityId!),
-          'Scheduled Maintenance': () => ScheduleMaintenanceScreen(facilityId: _selectedFacilityId!),
-          'Preventive Maintenance': () => PreventiveMaintenanceScreen(facilityId: _selectedFacilityId!),
-          'Reports': () => ReportsScreen(facilityId: _selectedFacilityId!),
-          'Price Lists': () => PriceListScreen(facilityId: _selectedFacilityId!),
-          'Work on Request': () => RequestScreen(facilityId: _selectedFacilityId!),
-          'Work Orders': () => WorkOrderScreen(facilityId: _selectedFacilityId!),
-          'Equipment Supplied': () => EquipmentSuppliedScreen(facilityId: _selectedFacilityId!),
-          'Inventory and Parts': () => InventoryScreen(facilityId: _selectedFacilityId!),
-          'Vendors': () => VendorScreen(facilityId: _selectedFacilityId!),
-          'Users': () => UserScreen(facilityId: _selectedFacilityId!),
-          'KPIs': () => KpiScreen(facilityId: _selectedFacilityId!),
-          'Report': () => ReportScreen(facilityId: _selectedFacilityId!),
-          'Settings': () => SettingsScreen(facilityId: _selectedFacilityId!),
-          'Billing': () => BillingScreen(facilityId: _selectedFacilityId!, userRole: _currentRole),
-        };
-
-        final screenBuilder = screenMap[title];
-        if (screenBuilder != null) {
-          final screen = screenBuilder();
-          if (screen != null) { // Only navigate if a screen was returned
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => screen),
-            ).then((_) {
-              logger.i('Successfully navigated to $title with facilityId: $_selectedFacilityId');
-            }).catchError((e) {
-              logger.e('Error navigating to $title: $e');
-              if (mounted && _messengerKey.currentState != null) {
-                _messengerKey.currentState!.showSnackBar(
-                  SnackBar(
-                    content: Text('Error navigating to $title: $e', style: GoogleFonts.poppins()),
-                  ),
-                );
-              }
-            });
-          }
-        } else {
-          _messengerKey.currentState?.showSnackBar(
-            SnackBar(
-              content: Text('$title feature not found', style: GoogleFonts.poppins()),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      logger.e('Error navigating to $title: $e');
-      if (mounted && _messengerKey.currentState != null) {
-        _messengerKey.currentState!.showSnackBar(
-          SnackBar(
-            content: Text('Error navigating to $title: $e', style: GoogleFonts.poppins()),
-          ),
-        );
-      }
-    }
   }
 }

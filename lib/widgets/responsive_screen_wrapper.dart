@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:logger/logger.dart';
 import 'package:cmms/display%20screens/locations_screen.dart';
 import 'package:cmms/display%20screens/building_survey_screen.dart';
 import 'package:cmms/display%20screens/documentations_screen.dart';
@@ -19,7 +22,7 @@ import 'package:cmms/display%20screens/report_screen.dart';
 import 'package:cmms/screens/settings_screen.dart';
 import 'package:cmms/screens/user_screen.dart';
 
-class ResponsiveScreenWrapper extends StatelessWidget {
+class ResponsiveScreenWrapper extends StatefulWidget {
   final String title;
   final Widget child;
   final String facilityId;
@@ -42,44 +45,125 @@ class ResponsiveScreenWrapper extends StatelessWidget {
   });
 
   @override
+  State<ResponsiveScreenWrapper> createState() => _ResponsiveScreenWrapperState();
+}
+
+class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
+  final Logger _logger = Logger(printer: PrettyPrinter());
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  
+  String _currentRole = 'User';
+  String _organization = '-';
+
+  @override
+  void initState() {
+    super.initState();
+    _currentRole = widget.currentRole ?? 'User';
+    _organization = widget.organization ?? '-';
+    _getCurrentUserRole();
+  }
+
+  Future<void> _getCurrentUserRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
+      final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
+      final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance.collection('Users').doc(user.uid).get();
+      
+      String newRole = 'User';
+      String newOrg = '-';
+      
+      if (adminDoc.exists) {
+        newRole = 'Admin';
+        final adminData = adminDoc.data();
+        newOrg = adminData?['organization'] ?? '-';
+      } 
+      else if (developerDoc.exists) {
+        newRole = 'Technician';
+        newOrg = 'JV Almacis';
+      }
+      else if (technicianDoc.exists) {
+        newRole = 'Technician';
+        final techData = technicianDoc.data();
+        newOrg = techData?['organization'] ?? '-';
+      }
+      else if (userDoc.exists) {
+        final userData = userDoc.data();
+        if (userData != null && userData['role'] == 'Technician') {
+          newRole = 'Technician';
+          newOrg = '-';
+        } else {
+          newRole = 'User';
+          newOrg = '-';
+        }
+      }
+      
+      if (mounted) {
+        setState(() {
+          _currentRole = newRole;
+          _organization = newOrg;
+        });
+      }
+    } catch (e) {
+      _logger.e('Error getting user role: $e');
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth <= 600;
-    final isTabletOrWeb = screenWidth > 600;
 
     return Scaffold(
+      key: _scaffoldKey,
       appBar: AppBar(
         title: Text(
-          title,
+          widget.title,
           style: GoogleFonts.poppins(
             color: Colors.white,
             fontWeight: FontWeight.bold,
-            fontSize: isMobile ? 20 : 24,
+            fontSize: isMobile ? 18 : 20,
           ),
         ),
         backgroundColor: Colors.blueGrey[800],
         leading: isMobile
             ? IconButton(
+                icon: const Icon(Icons.menu, color: Colors.white),
+                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+              )
+            : IconButton(
                 icon: const Icon(Icons.arrow_back, color: Colors.white),
                 onPressed: () => Navigator.pop(context),
-              )
-            : null,
-        actions: actions,
+              ),
+        actions: widget.actions,
         elevation: 0,
       ),
+      drawer: isMobile ? _buildDrawer() : null,
       body: Row(
         children: [
-          // Sidebar for tablet/web
-          if (isTabletOrWeb) _buildSidebar(context),
-          // Main content
-          Expanded(child: child),
+          if (!isMobile) _buildSidebar(),
+          Expanded(child: widget.child),
         ],
       ),
-      floatingActionButton: floatingActionButton,
+      floatingActionButton: widget.floatingActionButton,
     );
   }
 
-  Widget _buildSidebar(BuildContext context) {
+  Widget _buildDrawer() {
+    return Drawer(
+      child: Column(
+        children: [
+          _buildAppIcon(),
+          Expanded(child: ListView(children: _buildMenuItems())),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSidebar() {
     return Container(
       width: 250,
       color: Colors.blueGrey[50],
@@ -88,7 +172,7 @@ class ResponsiveScreenWrapper extends StatelessWidget {
           _buildAppIcon(),
           Expanded(
             child: ListView(
-              children: _buildMenuItems(context),
+              children: _buildMenuItems(),
             ),
           ),
         ],
@@ -107,11 +191,11 @@ class ResponsiveScreenWrapper extends StatelessWidget {
     );
   }
 
-  List<Widget> _buildMenuItems(BuildContext context) {
-    final role = currentRole ?? 'User';
-    final org = organization ?? '-';
+  List<Widget> _buildMenuItems() {
+    final role = _currentRole;
+    final org = _organization;
     
-    // Role-specific menu access
+    // Role-specific menu access - EXCLUDING Profile, About, Help & Support
     final Map<String, Map<String, List<String>>> roleMenuAccess = {
       'Admin': {
         'Embassy': [
@@ -141,9 +225,7 @@ class ResponsiveScreenWrapper extends StatelessWidget {
       },
       'User': {
         '-': [
-          'Facilities', 'Locations', 'Schedule Maintenance', 'Preventive Maintenance',
-          'Reports', 'Price Lists', 'Work on Request', 'Work Orders', 'Equipment Supplied',
-          'Inventory and Parts', 'Billing', 'Settings'
+          'Facilities', 'Settings'
         ],
       },
     };
@@ -164,6 +246,7 @@ class ResponsiveScreenWrapper extends StatelessWidget {
       {'title': 'Equipment Supplied', 'icon': Icons.construction, 'isSubItem': false},
       {'title': 'Inventory and Parts', 'icon': Icons.inventory, 'isSubItem': false},
       {'title': 'Vendors', 'icon': Icons.store, 'isSubItem': false},
+      {'title': 'Users', 'icon': Icons.people, 'isSubItem': false},
       {'title': 'KPIs', 'icon': Icons.trending_up, 'isSubItem': false},
       {'title': 'Report', 'icon': Icons.bar_chart, 'isSubItem': false},
       {'title': 'Settings', 'icon': Icons.settings, 'isSubItem': false},
@@ -190,8 +273,8 @@ class ResponsiveScreenWrapper extends StatelessWidget {
             leading: Icon(icon, color: Colors.blueGrey),
             title: Text(itemTitle, style: GoogleFonts.poppins()),
             onTap: () {
-              if (onFacilityReset != null) {
-                onFacilityReset!();
+              if (widget.onFacilityReset != null) {
+                widget.onFacilityReset!();
               } else {
                 Navigator.pop(context);
               }
@@ -208,7 +291,7 @@ class ResponsiveScreenWrapper extends StatelessWidget {
               : null,
           leading: Icon(icon, color: Colors.blueGrey),
           title: Text(itemTitle, style: GoogleFonts.poppins()),
-          onTap: () => _handleMenuNavigation(context, itemTitle),
+          onTap: () => _handleMenuNavigation(itemTitle),
         ),
       );
     }
@@ -216,8 +299,15 @@ class ResponsiveScreenWrapper extends StatelessWidget {
     return menuWidgets;
   }
 
-  void _handleMenuNavigation(BuildContext context, String title) {
-    if (facilityId.isEmpty) {
+  void _handleMenuNavigation(String title) {
+    // Close drawer if open on mobile
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth <= 600;
+    if (isMobile) {
+      Navigator.pop(context);
+    }
+
+    if (widget.facilityId.isEmpty && !['Settings'].contains(title)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -230,24 +320,24 @@ class ResponsiveScreenWrapper extends StatelessWidget {
     }
 
     final screenMap = {
-      'Locations': () => LocationsScreen(facilityId: facilityId),
-      'Building Survey': () => BuildingSurveyScreen(facilityId: facilityId, selectedSubSection: ''),
-      'Documentations': () => DocumentationsScreen(facilityId: facilityId),
-      'Drawings': () => DrawingsScreen(facilityId: facilityId),
-      'Schedule Maintenance': () => ScheduleMaintenanceScreen(facilityId: facilityId),
-      'Preventive Maintenance': () => PreventiveMaintenanceScreen(facilityId: facilityId),
-      'Reports': () => ReportsScreen(facilityId: facilityId),
-      'Work on Request': () => RequestScreen(facilityId: facilityId),
-      'Work Orders': () => WorkOrderScreen(facilityId: facilityId),
-      'Price Lists': () => PriceListScreen(facilityId: facilityId),
-      'Billing': () => BillingScreen(facilityId: facilityId, userRole: currentRole ?? 'User'),
-      'Equipment Supplied': () => EquipmentSuppliedScreen(facilityId: facilityId),
-      'Inventory and Parts': () => InventoryScreen(facilityId: facilityId),
-      'Vendors': () => VendorScreen(facilityId: facilityId),
-      'Users': () => UserScreen(facilityId: facilityId),
-      'KPIs': () => KpiScreen(facilityId: facilityId),
-      'Report': () => ReportScreen(facilityId: facilityId),
-      'Settings': () => SettingsScreen(facilityId: facilityId),
+      'Locations': () => LocationsScreen(facilityId: widget.facilityId),
+      'Building Survey': () => BuildingSurveyScreen(facilityId: widget.facilityId, selectedSubSection: ''),
+      'Documentations': () => DocumentationsScreen(facilityId: widget.facilityId),
+      'Drawings': () => DrawingsScreen(facilityId: widget.facilityId),
+      'Schedule Maintenance': () => ScheduleMaintenanceScreen(facilityId: widget.facilityId),
+      'Preventive Maintenance': () => PreventiveMaintenanceScreen(facilityId: widget.facilityId),
+      'Reports': () => ReportsScreen(facilityId: widget.facilityId),
+      'Work on Request': () => RequestScreen(facilityId: widget.facilityId),
+      'Work Orders': () => WorkOrderScreen(facilityId: widget.facilityId),
+      'Price Lists': () => PriceListScreen(facilityId: widget.facilityId),
+      'Billing': () => BillingScreen(facilityId: widget.facilityId, userRole: _currentRole),
+      'Equipment Supplied': () => EquipmentSuppliedScreen(facilityId: widget.facilityId),
+      'Inventory and Parts': () => InventoryScreen(facilityId: widget.facilityId),
+      'Vendors': () => VendorScreen(facilityId: widget.facilityId),
+      'Users': () => UserScreen(facilityId: widget.facilityId),
+      'KPIs': () => KpiScreen(facilityId: widget.facilityId),
+      'Report': () => ReportScreen(facilityId: widget.facilityId),
+      'Settings': () => SettingsScreen(facilityId: widget.facilityId),
     };
 
     final screenBuilder = screenMap[title];

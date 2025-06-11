@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cmms/screens/profile_screen.dart';
+import 'package:cmms/screens/about_screen.dart';
+import 'package:cmms/screens/help_support_screen.dart';
+import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 import 'package:logger/logger.dart';
-import 'package:cmms/authentication/login_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final String facilityId;
-
+  
   const SettingsScreen({super.key, required this.facilityId});
 
   @override
@@ -15,251 +19,431 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final Logger _logger = Logger(printer: PrettyPrinter());
-  final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
+  
+  bool _notificationsEnabled = true;
+  bool _emailNotifications = true;
+  bool _pushNotifications = true;
+  String _selectedTheme = 'System';
+  String _selectedLanguage = 'English';
+  
+  String _currentRole = 'User';
+  String _organization = '-';
 
-  Future<void> _handleLogout() async {
+  @override
+  void initState() {
+    super.initState();
+    _getCurrentUserRole();
+  }
+
+  Future<void> _getCurrentUserRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
     try {
-      final bool? confirmLogout = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('Confirm Logout', style: GoogleFonts.poppins()),
-          content: Text(
-            'Are you sure you want to log out?',
-            style: GoogleFonts.poppins(),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text('Cancel', style: GoogleFonts.poppins()),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-              ),
-              child: Text('Logout', style: GoogleFonts.poppins()),
-            ),
-          ],
-        ),
-      );
-
-      if (confirmLogout == true) {
-        await FirebaseAuth.instance.signOut();
-        if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (context) => const LoginScreen()),
-            (route) => false,
-          );
+      final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
+      final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
+      final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance.collection('Users').doc(user.uid).get();
+      
+      String newRole = 'User';
+      String newOrg = '-';
+      
+      if (adminDoc.exists) {
+        newRole = 'Admin';
+        final adminData = adminDoc.data();
+        newOrg = adminData?['organization'] ?? '-';
+      } 
+      else if (developerDoc.exists) {
+        newRole = 'Technician';
+        newOrg = 'JV Almacis';
+      }
+      else if (technicianDoc.exists) {
+        newRole = 'Technician';
+        final techData = technicianDoc.data();
+        newOrg = techData?['organization'] ?? '-';
+      }
+      else if (userDoc.exists) {
+        final userData = userDoc.data();
+        if (userData != null && userData['role'] == 'Technician') {
+          newRole = 'Technician';
+          newOrg = '-';
+        } else {
+          newRole = 'User';
+          newOrg = '-';
         }
       }
-    } catch (e) {
-      _logger.e('Error logging out: $e');
+      
       if (mounted) {
-        _messengerKey.currentState?.showSnackBar(
-          SnackBar(content: Text('Error logging out: $e', style: GoogleFonts.poppins())),
-        );
+        setState(() {
+          _currentRole = newRole;
+          _organization = newOrg;
+        });
       }
+    } catch (e) {
+      _logger.e('Error getting user role: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: true,
-      child: ScaffoldMessenger(
-        key: _messengerKey,
-        child: Scaffold(
-          extendBodyBehindAppBar: false,
-          appBar: AppBar(
-            title: Text(
-              'Settings',
-              style: GoogleFonts.poppins(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
+    return ResponsiveScreenWrapper(
+      title: 'Settings',
+      facilityId: widget.facilityId,
+      currentRole: _currentRole,
+      organization: _organization,
+      child: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    final user = FirebaseAuth.instance.currentUser;
+    
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        children: [
+          // User Profile Section
+          Card(
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'User Profile',
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey[800],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.blueGrey[100],
+                      child: Icon(Icons.person, color: Colors.blueGrey[700]),
+                    ),
+                    title: Text(
+                      user?.email ?? 'User',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text(
+                      'Tap to manage your profile',
+                      style: GoogleFonts.poppins(fontSize: 12),
+                    ),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const ProfileScreen()),
+                    ),
+                  ),
+                ],
               ),
             ),
-            backgroundColor: Colors.blueGrey,
-            iconTheme: const IconThemeData(color: Colors.white),
-            leading: IconButton(
-              onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.arrow_back, color: Colors.white),
-            ),
-            elevation: 0,
           ),
-          body: SingleChildScrollView(  // Changed from Padding to SingleChildScrollView for scrollability
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Application Settings',
-                  style: GoogleFonts.poppins(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blueGrey[800],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                
-                // Account Section
-                Card(
-                  elevation: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Account',
-                          style: GoogleFonts.poppins(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey[800],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        ListTile(
-                          leading: const Icon(Icons.person, color: Colors.blueGrey),
-                          title: Text('Profile', style: GoogleFonts.poppins()),
-                          subtitle: Text('View and edit your profile', style: GoogleFonts.poppins(fontSize: 12)),
-                          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                          onTap: () {
-                            _messengerKey.currentState?.showSnackBar(
-                              SnackBar(content: Text('Profile feature coming soon', style: GoogleFonts.poppins())),
-                            );
-                          },
-                        ),
-                        
-                        const Divider(),
-                        
-                        ListTile(
-                          leading: const Icon(Icons.notifications, color: Colors.blueGrey),
-                          title: Text('Notifications', style: GoogleFonts.poppins()),
-                          subtitle: Text('Manage notification preferences', style: GoogleFonts.poppins(fontSize: 12)),
-                          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                          onTap: () {
-                            _messengerKey.currentState?.showSnackBar(
-                              SnackBar(content: Text('Notification settings coming soon', style: GoogleFonts.poppins())),
-                            );
-                          },
-                        ),
-                      ],
+          
+          const SizedBox(height: 16),
+          
+          // Notification Settings
+          Card(
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Notifications',
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey[800],
                     ),
                   ),
-                ),
-                
-                const SizedBox(height: 16),
-                
-                // App Section
-                Card(
-                  elevation: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Application',
-                          style: GoogleFonts.poppins(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey[800],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        ListTile(
-                          leading: const Icon(Icons.info, color: Colors.blueGrey),
-                          title: Text('About', style: GoogleFonts.poppins()),
-                          subtitle: Text('App version and information', style: GoogleFonts.poppins(fontSize: 12)),
-                          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                          onTap: () {
-                            showDialog(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: Text('About CMMS', style: GoogleFonts.poppins()),
-                                content: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('Version: 1.0.0', style: GoogleFonts.poppins()),
-                                    const SizedBox(height: 8),
-                                    Text('Computerized Maintenance Management System', style: GoogleFonts.poppins()),
-                                    const SizedBox(height: 8),
-                                    Text('© 2025 Swedish Embassy', style: GoogleFonts.poppins()),
-                                  ],
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.pop(context),
-                                    child: Text('OK', style: GoogleFonts.poppins()),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                        
-                        const Divider(),
-                        
-                        ListTile(
-                          leading: const Icon(Icons.help, color: Colors.blueGrey),
-                          title: Text('Help & Support', style: GoogleFonts.poppins()),
-                          subtitle: Text('Get help and contact support', style: GoogleFonts.poppins(fontSize: 12)),
-                          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                          onTap: () {
-                            _messengerKey.currentState?.showSnackBar(
-                              SnackBar(content: Text('Help & Support coming soon', style: GoogleFonts.poppins())),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
+                  const SizedBox(height: 16),
+                  
+                  SwitchListTile(
+                    title: Text('Enable Notifications', style: GoogleFonts.poppins()),
+                    subtitle: Text('Receive maintenance reminders', style: GoogleFonts.poppins(fontSize: 12)),
+                    value: _notificationsEnabled,
+                    onChanged: (value) {
+                      setState(() {
+                        _notificationsEnabled = value;
+                      });
+                    },
                   ),
-                ),
-                
-                const SizedBox(height: 24),  // Changed from Spacer() to fixed height
-                
-                // Logout Section
-                Card(
-                  elevation: 2,
-                  color: Colors.red[50],
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Account Actions',
-                          style: GoogleFonts.poppins(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.red[800],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        ListTile(
-                          leading: const Icon(Icons.logout, color: Colors.red),
-                          title: Text('Logout', style: GoogleFonts.poppins(color: Colors.red[700])),
-                          subtitle: Text('Sign out of your account', style: GoogleFonts.poppins(fontSize: 12, color: Colors.red[600])),
-                          onTap: _handleLogout,
-                        ),
-                      ],
-                    ),
+                  
+                  SwitchListTile(
+                    title: Text('Email Notifications', style: GoogleFonts.poppins()),
+                    subtitle: Text('Receive notifications via email', style: GoogleFonts.poppins(fontSize: 12)),
+                    value: _emailNotifications,
+                    onChanged: _notificationsEnabled ? (value) {
+                      setState(() {
+                        _emailNotifications = value;
+                      });
+                    } : null,
                   ),
-                ),
-                
-                const SizedBox(height: 16),
-              ],
+                  
+                  SwitchListTile(
+                    title: Text('Push Notifications', style: GoogleFonts.poppins()),
+                    subtitle: Text('Receive push notifications on device', style: GoogleFonts.poppins(fontSize: 12)),
+                    value: _pushNotifications,
+                    onChanged: _notificationsEnabled ? (value) {
+                      setState(() {
+                        _pushNotifications = value;
+                      });
+                    } : null,
+                  ),
+                ],
+              ),
             ),
           ),
+          
+          const SizedBox(height: 16),
+          
+          // App Preferences
+          Card(
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'App Preferences',
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey[800],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  ListTile(
+                    leading: Icon(Icons.palette, color: Colors.blueGrey[700]),
+                    title: Text('Theme', style: GoogleFonts.poppins()),
+                    subtitle: Text(_selectedTheme, style: GoogleFonts.poppins(fontSize: 12)),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () => _showThemeDialog(),
+                  ),
+                  
+                  ListTile(
+                    leading: Icon(Icons.language, color: Colors.blueGrey[700]),
+                    title: Text('Language', style: GoogleFonts.poppins()),
+                    subtitle: Text(_selectedLanguage, style: GoogleFonts.poppins(fontSize: 12)),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () => _showLanguageDialog(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Support & Information - ONLY ACCESSIBLE FROM SETTINGS
+          Card(
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Support & Information',
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey[800],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  ListTile(
+                    leading: Icon(Icons.help, color: Colors.blueGrey[700]),
+                    title: Text('Help & Support', style: GoogleFonts.poppins()),
+                    subtitle: Text('Get help and contact support', style: GoogleFonts.poppins(fontSize: 12)),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const HelpSupportScreen()),
+                    ),
+                  ),
+                  
+                  ListTile(
+                    leading: Icon(Icons.info, color: Colors.blueGrey[700]),
+                    title: Text('About', style: GoogleFonts.poppins()),
+                    subtitle: Text('App information and version', style: GoogleFonts.poppins(fontSize: 12)),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const AboutScreen()),
+                    ),
+                  ),
+                  
+                  ListTile(
+                    leading: Icon(Icons.privacy_tip, color: Colors.blueGrey[700]),
+                    title: Text('Privacy Policy', style: GoogleFonts.poppins()),
+                    subtitle: Text('View privacy policy', style: GoogleFonts.poppins(fontSize: 12)),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () => _showPrivacyPolicy(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Account Actions
+          Card(
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Account',
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey[800],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  ListTile(
+                    leading: Icon(Icons.logout, color: Colors.red[700]),
+                    title: Text('Sign Out', style: GoogleFonts.poppins(color: Colors.red[700])),
+                    subtitle: Text('Sign out of your account', style: GoogleFonts.poppins(fontSize: 12)),
+                    onTap: () => _showSignOutDialog(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showThemeDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Select Theme', style: GoogleFonts.poppins()),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: ['System', 'Light', 'Dark'].map((theme) {
+            return RadioListTile<String>(
+              title: Text(theme, style: GoogleFonts.poppins()),
+              value: theme,
+              groupValue: _selectedTheme,
+              onChanged: (value) {
+                setState(() {
+                  _selectedTheme = value!;
+                });
+                Navigator.pop(context);
+              },
+            );
+          }).toList(),
         ),
       ),
     );
+  }
+
+  void _showLanguageDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Select Language', style: GoogleFonts.poppins()),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: ['English', 'Swahili'].map((language) {
+            return RadioListTile<String>(
+              title: Text(language, style: GoogleFonts.poppins()),
+              value: language,
+              groupValue: _selectedLanguage,
+              onChanged: (value) {
+                setState(() {
+                  _selectedLanguage = value!;
+                });
+                Navigator.pop(context);
+              },
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  void _showPrivacyPolicy() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Privacy Policy', style: GoogleFonts.poppins()),
+        content: SingleChildScrollView(
+          child: Text(
+            'This CMMS application collects and processes data necessary for maintenance management operations. Your data is securely stored and processed in accordance with applicable data protection regulations.',
+            style: GoogleFonts.poppins(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close', style: GoogleFonts.poppins()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSignOutDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Sign Out', style: GoogleFonts.poppins()),
+        content: Text(
+          'Are you sure you want to sign out?',
+          style: GoogleFonts.poppins(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.poppins()),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _performSignOut();
+            },
+            child: Text('Sign Out', style: GoogleFonts.poppins(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _performSignOut() async {
+    try {
+      await FirebaseAuth.instance.signOut();
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/login',
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error signing out: $e', style: GoogleFonts.poppins()),
+          ),
+        );
+      }
+    }
   }
 }
