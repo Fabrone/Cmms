@@ -9,6 +9,7 @@ import 'package:logger/logger.dart';
 import 'package:uuid/uuid.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cmms/models/request.dart';
+import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 import 'dart:io';
 
 class RequestScreen extends StatefulWidget {
@@ -25,62 +26,110 @@ class _RequestScreenState extends State<RequestScreen> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _commentController = TextEditingController();
-  final Logger _logger = Logger();
-  final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
+  final Logger _logger = Logger(printer: PrettyPrinter());
   String _selectedStatus = 'All';
   String _priority = 'Medium';
   final List<Map<String, String>> _attachmentUrls = [];
   bool _showForm = false;
+  String _currentRole = 'User';
+  String _organization = '-';
 
   @override
   void initState() {
     super.initState();
+    _getCurrentUserRole();
     _logger.i('RequestScreen initialized: facilityId=${widget.facilityId}');
   }
 
-  Future<void> _submitRequest() async {
-    if (_formKey.currentState!.validate()) {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        _logger.e('No user signed in');
-        _showSnackBar('Please sign in to submit requests');
-        return;
+  Future<void> _getCurrentUserRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
+      final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
+      final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance.collection('Users').doc(user.uid).get();
+
+      String newRole = 'User';
+      String newOrg = '-';
+
+      if (adminDoc.exists) {
+        newRole = 'Admin';
+        newOrg = adminDoc.data()?['organization'] ?? '-';
+      } else if (developerDoc.exists) {
+        newRole = 'Technician';
+        newOrg = 'JV Almacis';
+      } else if (technicianDoc.exists) {
+        newRole = 'Technician';
+        newOrg = technicianDoc.data()?['organization'] ?? '-';
+      } else if (userDoc.exists) {
+        final userData = userDoc.data();
+        if (userData != null && userData['role'] == 'Technician') {
+          newRole = 'Technician';
+          newOrg = '-';
+        } else {
+          newRole = 'User';
+          newOrg = '-';
+        }
       }
-      try {
-        _logger.i('Submitting request: title=${_titleController.text}, facilityId=${widget.facilityId}');
-        final requestId = const Uuid().v4();
-        
-        final request = Request(
-          id: requestId,
-          requestId: requestId,
-          title: _titleController.text.trim(),
-          description: _descriptionController.text.trim(),
-          status: 'Open',
-          priority: _priority,
-          createdAt: DateTime.now(),
-          createdBy: user.uid,
-          createdByEmail: user.email,
-          attachments: _attachmentUrls,
-          comments: _commentController.text.isNotEmpty
-              ? [
-                  {
-                    'text': _commentController.text.trim(),
-                    'by': user.email ?? 'Unknown',
-                    'timestamp': Timestamp.now(),
-                  }
-                ]
-              : [],
-          workOrderIds: [],
-          clientStatus: 'Pending',
-        );
 
-        await FirebaseFirestore.instance
-            .collection('facilities')
-            .doc(widget.facilityId)
-            .collection('requests')
-            .doc(requestId)
-            .set(request.toMap());
+      if (mounted) {
+        setState(() {
+          _currentRole = newRole;
+          _organization = newOrg;
+        });
+      }
+    } catch (e) {
+      _logger.e('Error getting user role: $e');
+    }
+  }
 
+  Future<void> _submitRequest() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _logger.e('No user signed in');
+      if (mounted) _showSnackBar('Please sign in to submit requests');
+      return;
+    }
+    try {
+      _logger.i('Submitting request: title=${_titleController.text}, facilityId=${widget.facilityId}');
+      final requestId = const Uuid().v4();
+
+      final request = Request(
+        id: requestId,
+        requestId: requestId,
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim(),
+        status: 'Open',
+        priority: _priority,
+        createdAt: DateTime.now(),
+        createdBy: user.uid,
+        createdByEmail: user.email,
+        attachments: _attachmentUrls,
+        comments: _commentController.text.isNotEmpty
+            ? [
+                {
+                  'text': _commentController.text.trim(),
+                  'by': user.email ?? 'Unknown',
+                  'timestamp': Timestamp.now(),
+                }
+              ]
+            : [],
+        workOrderIds: [],
+        clientStatus: 'Pending',
+      );
+
+      await FirebaseFirestore.instance
+          .collection('facilities')
+          .doc(widget.facilityId)
+          .collection('requests')
+          .doc(requestId)
+          .set(request.toMap());
+
+      if (mounted) {
         _titleController.clear();
         _descriptionController.clear();
         _commentController.clear();
@@ -89,10 +138,10 @@ class _RequestScreenState extends State<RequestScreen> {
           _showForm = false;
         });
         _showSnackBar('Request submitted successfully');
-      } catch (e) {
-        _logger.e('Error submitting request: $e');
-        _showSnackBar('Error submitting request: $e');
       }
+    } catch (e) {
+      _logger.e('Error submitting request: $e');
+      if (mounted) _showSnackBar('Error submitting request: $e');
     }
   }
 
@@ -105,7 +154,7 @@ class _RequestScreenState extends State<RequestScreen> {
       );
       if (result == null || result.files.isEmpty) {
         _logger.w('No file selected');
-        _showSnackBar('No file selected');
+        if (mounted) _showSnackBar('No file selected');
         return;
       }
 
@@ -120,7 +169,7 @@ class _RequestScreenState extends State<RequestScreen> {
       if (kIsWeb) {
         if (file.bytes == null) {
           _logger.e('No bytes available for web upload');
-          _showSnackBar('File data unavailable');
+          if (mounted) _showSnackBar('File data unavailable');
           return;
         }
         final uploadTask = await storageRef.putData(file.bytes!);
@@ -128,7 +177,7 @@ class _RequestScreenState extends State<RequestScreen> {
       } else {
         if (file.path == null) {
           _logger.e('No path available for non-web upload');
-          _showSnackBar('File path unavailable');
+          if (mounted) _showSnackBar('File path unavailable');
           return;
         }
         final uploadTask = await storageRef.putFile(File(file.path!));
@@ -136,13 +185,15 @@ class _RequestScreenState extends State<RequestScreen> {
       }
 
       _logger.i('Attachment uploaded successfully: $url');
-      setState(() {
-        _attachmentUrls.add({'name': file.name, 'url': url});
-      });
-      _showSnackBar('Attachment uploaded');
+      if (mounted) {
+        setState(() {
+          _attachmentUrls.add({'name': file.name, 'url': url});
+        });
+        _showSnackBar('Attachment uploaded');
+      }
     } catch (e) {
       _logger.e('Error uploading attachment: $e');
-      _showSnackBar('Error uploading attachment: $e');
+      if (mounted) _showSnackBar('Error uploading attachment: $e');
     }
   }
 
@@ -150,7 +201,7 @@ class _RequestScreenState extends State<RequestScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       _logger.e('No user signed in');
-      _showSnackBar('Please sign in to update requests');
+      if (mounted) _showSnackBar('Please sign in to update requests');
       return;
     }
     try {
@@ -174,17 +225,16 @@ class _RequestScreenState extends State<RequestScreen> {
           .collection('requests')
           .doc(docId)
           .update(updates);
-      _logger.i('Request status updated successfully');
-      _showSnackBar('Request status updated to $newStatus');
+      if (mounted) _showSnackBar('Request status updated to $newStatus');
     } catch (e) {
       _logger.e('Error updating request: $e');
-      _showSnackBar('Error updating request: $e');
+      if (mounted) _showSnackBar('Error updating request: $e');
     }
   }
 
   void _showSnackBar(String message) {
     if (mounted) {
-      _messengerKey.currentState?.showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message, style: GoogleFonts.poppins())),
       );
     }
@@ -200,140 +250,147 @@ class _RequestScreenState extends State<RequestScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return ResponsiveScreenWrapper(
+      title: 'Work on Request',
+      facilityId: widget.facilityId,
+      currentRole: _currentRole,
+      organization: _organization,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => setState(() => _showForm = !_showForm),
+        backgroundColor: Colors.blueGrey[800],
+        icon: Icon(_showForm ? Icons.close : Icons.add, color: Colors.white),
+        label: Text(
+          _showForm ? 'Cancel' : 'New Request',
+          style: GoogleFonts.poppins(color: Colors.white),
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      child: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth <= 600;
-    final fontSizeTitle = isMobile ? 20.0 : 24.0;
+    final padding = isMobile ? 16.0 : screenWidth <= 900 ? 24.0 : 32.0;
+    final fontSizeTitle = isMobile ? 20.0 : screenWidth <= 900 ? 24.0 : 28.0;
+    final fontSizeSubtitle = isMobile ? 14.0 : screenWidth <= 900 ? 16.0 : 18.0;
 
-    return PopScope(
-      canPop: true,
-      child: ScaffoldMessenger(
-        key: _messengerKey,
-        child: Scaffold(
-          appBar: AppBar(
-            title: Text(
-              'Maintenance Requests',
-              style: GoogleFonts.poppins(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: fontSizeTitle,
+    return Column(
+      children: [
+        Container(
+          padding: EdgeInsets.all(padding),
+          color: Colors.grey[100],
+          child: Row(
+            children: [
+              Text(
+                'Filter by Status:',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w500,
+                  color: Colors.blueGrey[800],
+                  fontSize: fontSizeSubtitle,
+                ),
               ),
-            ),
-            backgroundColor: Colors.blueGrey[800],
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back, color: Colors.white),
-              onPressed: () => Navigator.pop(context),
-            ),
-            elevation: 0,
+              const SizedBox(width: 12),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: _selectedStatus,
+                  items: ['All', 'Open', 'In Progress', 'Closed']
+                      .map((s) => DropdownMenuItem(
+                            value: s,
+                            child: Text(s, style: GoogleFonts.poppins(color: Colors.blueGrey[900])),
+                          ))
+                      .toList(),
+                  onChanged: (value) => setState(() => _selectedStatus = value!),
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: Colors.grey[400]!),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    filled: true,
+                    fillColor: Colors.white,
+                    labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
+                  ),
+                  style: GoogleFonts.poppins(color: Colors.blueGrey[900]),
+                ),
+              ),
+            ],
           ),
-          body: SafeArea(
-            child: Column(
-              children: [
-                // Filter Section
-                Container(
-                  padding: const EdgeInsets.all(16.0),
-                  color: Colors.grey[100],
-                  child: Row(
+        ),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: _selectedStatus == 'All'
+                ? FirebaseFirestore.instance
+                    .collection('facilities')
+                    .doc(widget.facilityId)
+                    .collection('requests')
+                    .orderBy('createdAt', descending: true)
+                    .snapshots()
+                : FirebaseFirestore.instance
+                    .collection('facilities')
+                    .doc(widget.facilityId)
+                    .collection('requests')
+                    .where('status', isEqualTo: _selectedStatus)
+                    .orderBy('createdAt', descending: true)
+                    .snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                _logger.e('Firestore error: ${snapshot.error}');
+                return Center(
+                  child: Text(
+                    'Error: ${snapshot.error}',
+                    style: GoogleFonts.poppins(),
+                  ),
+                );
+              }
+              final docs = snapshot.data!.docs;
+              if (docs.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
-                        'Filter by Status:',
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w500,
-                          color: Colors.blueGrey[800],
-                        ),
+                      Icon(
+                        Icons.request_page_outlined,
+                        size: 64,
+                        color: Colors.grey[400],
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _selectedStatus,
-                          items: ['All', 'Open', 'In Progress', 'Closed']
-                              .map((s) => DropdownMenuItem(
-                                    value: s,
-                                    child: Text(s, style: GoogleFonts.poppins()),
-                                  ))
-                              .toList(),
-                          onChanged: (value) => setState(() => _selectedStatus = value!),
-                          decoration: InputDecoration(
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.blueGrey[300]!),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            filled: true,
-                            fillColor: Colors.white,
-                          ),
-                          style: GoogleFonts.poppins(),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No requests found',
+                        style: GoogleFonts.poppins(
+                          fontSize: fontSizeSubtitle,
+                          color: Colors.grey[600],
                         ),
                       ),
                     ],
                   ),
-                ),
-                // Requests List
-                Expanded(
-                  child: StreamBuilder<QuerySnapshot>(
-                    stream: _selectedStatus == 'All'
-                        ? FirebaseFirestore.instance
-                            .collection('facilities')
-                            .doc(widget.facilityId)
-                            .collection('requests')
-                            .orderBy('createdAt', descending: true)
-                            .snapshots()
-                        : FirebaseFirestore.instance
-                            .collection('facilities')
-                            .doc(widget.facilityId)
-                            .collection('requests')
-                            .where('status', isEqualTo: _selectedStatus)
-                            .orderBy('createdAt', descending: true)
-                            .snapshots(),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      if (snapshot.hasError) {
-                        _logger.e('Firestore error: ${snapshot.error}');
-                        return Center(
-                          child: Text(
-                            'Error: ${snapshot.error}',
-                            style: GoogleFonts.poppins(),
-                          ),
-                        );
-                      }
-                      final docs = snapshot.data!.docs;
-                      if (docs.isEmpty) {
-                        return Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                );
+              }
+              return ListView.builder(
+                padding: EdgeInsets.all(padding),
+                itemCount: docs.length,
+                itemBuilder: (context, index) {
+                  final request = Request.fromSnapshot(docs[index]);
+                  return Card(
+                    elevation: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
                             children: [
-                              Icon(
-                                Icons.request_page_outlined,
-                                size: 64,
-                                color: Colors.grey[400],
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'No requests found',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 18,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                      return ListView.builder(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: docs.length,
-                        itemBuilder: (context, index) {
-                          final request = Request.fromSnapshot(docs[index]);
-                          
-                          return Card(
-                            elevation: 2,
-                            margin: const EdgeInsets.only(bottom: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: ExpansionTile(
-                              leading: CircleAvatar(
+                              CircleAvatar(
                                 backgroundColor: _getStatusColor(request.status),
                                 child: Icon(
                                   _getStatusIcon(request.status),
@@ -341,78 +398,60 @@ class _RequestScreenState extends State<RequestScreen> {
                                   size: 20,
                                 ),
                               ),
-                              title: Text(
-                                request.title,
-                                style: GoogleFonts.poppins(
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.blueGrey[900],
-                                ),
-                              ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Status: ${request.status} | Priority: ${request.priority}',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 12,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                  Text(
-                                    'Created: ${request.createdAt != null ? DateFormat.yMMMd().format(request.createdAt!) : 'Unknown date'}',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 12,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.all(16.0),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      _buildDetailRow('Description', request.description),
-                                      _buildDetailRow('Created By', request.createdByEmail ?? 'Unknown'),
-                                      if (request.attachments.isNotEmpty)
-                                        _buildAttachmentsSection(request.attachments),
-                                      if (request.comments.isNotEmpty) 
-                                        _buildCommentsSection(request.comments),
-                                      if (request.workOrderIds.isNotEmpty) 
-                                        _buildWorkOrdersSection(request.workOrderIds),
-                                      const SizedBox(height: 12),
-                                      _buildActionButtons(request),
-                                    ],
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  request.title,
+                                  style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.blueGrey[900],
+                                    fontSize: fontSizeSubtitle,
                                   ),
                                 ),
-                              ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Status: ${request.status} | Priority: ${request.priority}',
+                            style: GoogleFonts.poppins(
+                              fontSize: isMobile ? 12 : 14,
+                              color: Colors.grey[600],
                             ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
+                          ),
+                          Text(
+                            'Created: ${request.createdAt != null ? DateFormat.yMMMd().format(request.createdAt!) : 'Unknown date'}',
+                            style: GoogleFonts.poppins(
+                              fontSize: isMobile ? 12 : 14,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _buildDetailRow('Description', request.description, fontSizeSubtitle),
+                          _buildDetailRow('Created By', request.createdByEmail ?? 'Unknown', fontSizeSubtitle),
+                          if (request.attachments.isNotEmpty)
+                            _buildAttachmentsSection(request.attachments, fontSizeSubtitle),
+                          if (request.comments.isNotEmpty)
+                            _buildCommentsSection(request.comments, fontSizeSubtitle),
+                          if (request.workOrderIds.isNotEmpty)
+                            _buildWorkOrdersSection(request.workOrderIds, fontSizeSubtitle),
+                          const SizedBox(height: 12),
+                          _buildActionButtons(request, fontSizeSubtitle),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
           ),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => setState(() => _showForm = !_showForm),
-            backgroundColor: Colors.blueGrey[800],
-            icon: Icon(_showForm ? Icons.close : Icons.add, color: Colors.white),
-            label: Text(
-              _showForm ? 'Cancel' : 'New Request',
-              style: GoogleFonts.poppins(color: Colors.white),
-            ),
-          ),
-          bottomSheet: _showForm ? _buildRequestForm() : null,
         ),
-      ),
+        if (_showForm) _buildRequestForm(padding, fontSizeTitle, fontSizeSubtitle),
+      ],
     );
   }
 
-  Widget _buildDetailRow(String label, String value) {
+  Widget _buildDetailRow(String label, String value, double fontSize) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: Row(
@@ -425,13 +464,14 @@ class _RequestScreenState extends State<RequestScreen> {
               style: GoogleFonts.poppins(
                 fontWeight: FontWeight.w500,
                 color: Colors.blueGrey[700],
+                fontSize: fontSize,
               ),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: GoogleFonts.poppins(color: Colors.grey[800]),
+              style: GoogleFonts.poppins(color: Colors.grey[800], fontSize: fontSize),
             ),
           ),
         ],
@@ -439,7 +479,7 @@ class _RequestScreenState extends State<RequestScreen> {
     );
   }
 
-  Widget _buildAttachmentsSection(List<Map<String, String>> attachments) {
+  Widget _buildAttachmentsSection(List<Map<String, String>> attachments, double fontSize) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: Column(
@@ -450,6 +490,7 @@ class _RequestScreenState extends State<RequestScreen> {
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w500,
               color: Colors.blueGrey[700],
+              fontSize: fontSize,
             ),
           ),
           const SizedBox(height: 4),
@@ -459,7 +500,7 @@ class _RequestScreenState extends State<RequestScreen> {
                 .map((attachment) => Chip(
                       label: Text(
                         attachment['name'] ?? 'Unknown',
-                        style: GoogleFonts.poppins(fontSize: 12),
+                        style: GoogleFonts.poppins(fontSize: fontSize - 2),
                       ),
                       backgroundColor: Colors.blue[50],
                     ))
@@ -470,7 +511,7 @@ class _RequestScreenState extends State<RequestScreen> {
     );
   }
 
-  Widget _buildCommentsSection(List<Map<String, dynamic>> comments) {
+  Widget _buildCommentsSection(List<Map<String, dynamic>> comments, double fontSize) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: Column(
@@ -481,6 +522,7 @@ class _RequestScreenState extends State<RequestScreen> {
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w500,
               color: Colors.blueGrey[700],
+              fontSize: fontSize,
             ),
           ),
           const SizedBox(height: 4),
@@ -496,12 +538,12 @@ class _RequestScreenState extends State<RequestScreen> {
                   children: [
                     Text(
                       comment['text'] ?? '',
-                      style: GoogleFonts.poppins(fontSize: 12),
+                      style: GoogleFonts.poppins(fontSize: fontSize - 2),
                     ),
                     Text(
                       'by ${comment['by'] ?? 'Unknown'} at ${comment['timestamp'] != null ? DateFormat.yMMMd().format((comment['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
                       style: GoogleFonts.poppins(
-                        fontSize: 10,
+                        fontSize: fontSize - 4,
                         color: Colors.grey[600],
                       ),
                     ),
@@ -513,7 +555,7 @@ class _RequestScreenState extends State<RequestScreen> {
     );
   }
 
-  Widget _buildWorkOrdersSection(List<String> workOrderIds) {
+  Widget _buildWorkOrdersSection(List<String> workOrderIds, double fontSize) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: Column(
@@ -524,6 +566,7 @@ class _RequestScreenState extends State<RequestScreen> {
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w500,
               color: Colors.blueGrey[700],
+              fontSize: fontSize,
             ),
           ),
           const SizedBox(height: 4),
@@ -546,7 +589,7 @@ class _RequestScreenState extends State<RequestScreen> {
                     ),
                     child: Text(
                       '${workOrder['title'] ?? 'Untitled'} - Status: ${workOrder['clientStatus'] ?? 'Unknown'}',
-                      style: GoogleFonts.poppins(fontSize: 12),
+                      style: GoogleFonts.poppins(fontSize: fontSize - 2),
                     ),
                   );
                 },
@@ -556,14 +599,14 @@ class _RequestScreenState extends State<RequestScreen> {
     );
   }
 
-  Widget _buildActionButtons(Request request) {
+  Widget _buildActionButtons(Request request, double fontSize) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         TextButton.icon(
-          onPressed: () => _showUpdateStatusDialog(request),
+          onPressed: () => _showUpdateStatusDialog(request, fontSize),
           icon: const Icon(Icons.edit, size: 16),
-          label: Text('Update Status', style: GoogleFonts.poppins()),
+          label: Text('Update Status', style: GoogleFonts.poppins(fontSize: fontSize)),
           style: TextButton.styleFrom(
             foregroundColor: Colors.blueGrey[700],
           ),
@@ -572,14 +615,15 @@ class _RequestScreenState extends State<RequestScreen> {
     );
   }
 
-  void _showUpdateStatusDialog(Request request) {
+  void _showUpdateStatusDialog(Request request, double fontSize) {
     final commentController = TextEditingController();
     String selectedStatus = request.status;
 
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Update Request Status', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Update Request Status', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: fontSize)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -588,25 +632,44 @@ class _RequestScreenState extends State<RequestScreen> {
               items: ['Open', 'In Progress', 'Closed']
                   .map((status) => DropdownMenuItem(
                         value: status,
-                        child: Text(status, style: GoogleFonts.poppins()),
+                        child: Text(status, style: GoogleFonts.poppins(color: Colors.blueGrey[900])),
                       ))
                   .toList(),
               onChanged: (value) => selectedStatus = value!,
               decoration: InputDecoration(
                 labelText: 'Status',
-                border: const OutlineInputBorder(),
-                labelStyle: GoogleFonts.poppins(),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: Colors.grey[400]!),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
+                ),
+                filled: true,
+                fillColor: Colors.white,
+                labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
               ),
+              style: GoogleFonts.poppins(color: Colors.blueGrey[900]),
             ),
             const SizedBox(height: 16),
-            TextField(
+            TextFormField(
               controller: commentController,
               decoration: InputDecoration(
                 labelText: 'Comment (optional)',
-                border: const OutlineInputBorder(),
-                labelStyle: GoogleFonts.poppins(),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: Colors.grey[400]!),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
+                ),
+                filled: true,
+                fillColor: Colors.grey[100],
+                labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
               ),
-              style: GoogleFonts.poppins(),
+              style: GoogleFonts.poppins(fontSize: fontSize),
               maxLines: 2,
             ),
           ],
@@ -614,124 +677,87 @@ class _RequestScreenState extends State<RequestScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.poppins()),
+            child: Text('Cancel', style: GoogleFonts.poppins(fontSize: fontSize)),
           ),
           ElevatedButton(
             onPressed: () {
               _updateRequest(request.id, selectedStatus, commentController.text);
               Navigator.pop(context);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey[800]),
-            child: Text('Update', style: GoogleFonts.poppins(color: Colors.white)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blueGrey[800],
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: Text('Update', style: GoogleFonts.poppins(color: Colors.white, fontSize: fontSize)),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildRequestForm() {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.7,
-      padding: const EdgeInsets.all(16.0),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 10,
-            offset: Offset(0, -2),
-          ),
-        ],
-      ),
-      child: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
+  Widget _buildRequestForm(double padding, double fontSizeTitle, double fontSizeSubtitle) {
+    final isMobile = MediaQuery.of(context).size.width <= 600;
+
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: EdgeInsets.all(padding),
+      child: Padding(
+        padding: EdgeInsets.all(padding),
+        child: Form(
+          key: _formKey,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Submit New Request',
-                style: GoogleFonts.poppins(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blueGrey[900],
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Submit New Request',
+                    style: GoogleFonts.poppins(
+                      fontSize: fontSizeTitle,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey[900],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.blueGrey),
+                    onPressed: () => setState(() => _showForm = false),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
-              TextFormField(
-                controller: _titleController,
-                decoration: InputDecoration(
-                  labelText: 'Title',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
-                  ),
-                  labelStyle: GoogleFonts.poppins(),
-                ),
-                style: GoogleFonts.poppins(),
-                validator: (value) => value!.isEmpty ? 'Enter a title' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _descriptionController,
-                decoration: InputDecoration(
-                  labelText: 'Description',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
-                  ),
-                  labelStyle: GoogleFonts.poppins(),
-                ),
-                style: GoogleFonts.poppins(),
-                maxLines: 3,
-                validator: (value) => value!.isEmpty ? 'Enter a description' : null,
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                value: _priority,
-                items: ['Low', 'Medium', 'High']
-                    .map((p) => DropdownMenuItem(
-                          value: p,
-                          child: Text(p, style: GoogleFonts.poppins()),
-                        ))
-                    .toList(),
-                onChanged: (value) => setState(() => _priority = value!),
-                decoration: InputDecoration(
-                  labelText: 'Priority',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
-                  ),
-                  labelStyle: GoogleFonts.poppins(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _commentController,
-                decoration: InputDecoration(
-                  labelText: 'Comment (optional)',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
-                  ),
-                  labelStyle: GoogleFonts.poppins(),
-                ),
-                style: GoogleFonts.poppins(),
-                maxLines: 2,
-              ),
+              isMobile
+                  ? Column(
+                      children: [
+                        _buildTextField(_titleController, 'Title', fontSizeSubtitle, validator: (value) => value!.isEmpty ? 'Enter a title' : null),
+                        const SizedBox(height: 16),
+                        _buildTextField(_descriptionController, 'Description', fontSizeSubtitle, maxLines: 3, validator: (value) => value!.isEmpty ? 'Enter a description' : null),
+                        const SizedBox(height: 16),
+                        _buildDropdown('Priority', _priority, ['Low', 'Medium', 'High'], (value) => setState(() => _priority = value!), fontSizeSubtitle),
+                        const SizedBox(height: 16),
+                        _buildTextField(_commentController, 'Comment (optional)', fontSizeSubtitle, maxLines: 2),
+                      ],
+                    )
+                  : Column(
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(child: _buildTextField(_titleController, 'Title', fontSizeSubtitle, validator: (value) => value!.isEmpty ? 'Enter a title' : null)),
+                            const SizedBox(width: 16),
+                            Expanded(child: _buildTextField(_descriptionController, 'Description', fontSizeSubtitle, maxLines: 3, validator: (value) => value!.isEmpty ? 'Enter a description' : null)),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(child: _buildDropdown('Priority', _priority, ['Low', 'Medium', 'High'], (value) => setState(() => _priority = value!), fontSizeSubtitle)),
+                            const SizedBox(width: 16),
+                            Expanded(child: _buildTextField(_commentController, 'Comment (optional)', fontSizeSubtitle, maxLines: 2)),
+                          ],
+                        ),
+                      ],
+                    ),
               const SizedBox(height: 16),
               Row(
                 children: [
@@ -739,11 +765,12 @@ class _RequestScreenState extends State<RequestScreen> {
                     child: ElevatedButton.icon(
                       onPressed: _uploadAttachment,
                       icon: const Icon(Icons.attach_file, color: Colors.white),
-                      label: Text('Add Attachment', style: GoogleFonts.poppins(color: Colors.white)),
+                      label: Text('Add Attachment', style: GoogleFonts.poppins(color: Colors.white, fontSize: fontSizeSubtitle)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blueGrey[600],
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 4,
                       ),
                     ),
                   ),
@@ -755,36 +782,112 @@ class _RequestScreenState extends State<RequestScreen> {
                   spacing: 8,
                   children: _attachmentUrls
                       .map((attachment) => Chip(
-                            label: Text(attachment['name']!, style: GoogleFonts.poppins(fontSize: 12)),
+                            label: Text(attachment['name']!, style: GoogleFonts.poppins(fontSize: fontSizeSubtitle - 2)),
                             backgroundColor: Colors.blue[50],
                           ))
                       .toList(),
                 ),
               ],
               const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _submitRequest,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueGrey[800],
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  child: Text(
-                    'Submit Request',
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => setState(() => _showForm = false),
+                      child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.blueGrey[800], fontSize: fontSizeSubtitle)),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _submitRequest,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blueGrey[800],
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 4,
+                      ),
+                      child: Text(
+                        'Submit Request',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: fontSizeSubtitle,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTextField(
+    TextEditingController controller,
+    String labelText,
+    double fontSize, {
+    int maxLines = 1,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      decoration: InputDecoration(
+        labelText: labelText,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: Colors.grey[400]!),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
+        ),
+        filled: true,
+        fillColor: Colors.grey[100],
+        contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
+      ),
+      style: GoogleFonts.poppins(fontSize: fontSize),
+      maxLines: maxLines,
+      validator: validator,
+    );
+  }
+
+  Widget _buildDropdown(
+    String labelText,
+    String value,
+    List<String> items,
+    Function(String?) onChanged,
+    double fontSize,
+  ) {
+    return DropdownButtonFormField<String>(
+      value: value,
+      items: items
+          .map((item) => DropdownMenuItem(
+                value: item,
+                child: Text(item, style: GoogleFonts.poppins(color: Colors.blueGrey[900])),
+              ))
+          .toList(),
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        labelText: labelText,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: Colors.grey[400]!),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
+        ),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
+      ),
+      style: GoogleFonts.poppins(color: Colors.blueGrey[900], fontSize: fontSize),
     );
   }
 

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:cmms/models/maintenance_task.dart';
 import 'package:cmms/services/notification_service.dart';
+import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -34,7 +35,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
   final _frequencyController = TextEditingController();
   final FocusNode _categoryFocus = FocusNode();
   final FocusNode _componentFocus = FocusNode();
-  bool _isDocumentSectionExpanded = false;
   bool _showScheduleForm = false;
   List<String> _categorySuggestions = [];
   final List<String> _commonCategories = [
@@ -45,6 +45,8 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
   ];
   double? _uploadProgress;
   final NotificationService _notificationService = NotificationService();
+  String _currentRole = 'User';
+  String _organization = '-';
 
   @override
   void initState() {
@@ -52,7 +54,52 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     tz.initializeTimeZones();
     _categoryController.addListener(_updateCategorySuggestions);
     _notificationService.initialize();
+    _getCurrentUserRole();
     logger.i('ScheduleMaintenanceScreen initialized with facilityId: ${widget.facilityId}');
+  }
+
+  Future<void> _getCurrentUserRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
+      final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
+      final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance.collection('Users').doc(user.uid).get();
+
+      String newRole = 'User';
+      String newOrg = '-';
+
+      if (adminDoc.exists) {
+        newRole = 'Admin';
+        newOrg = adminDoc.data()?['organization'] ?? '-';
+      } else if (developerDoc.exists) {
+        newRole = 'Technician';
+        newOrg = 'JV Almacis';
+      } else if (technicianDoc.exists) {
+        newRole = 'Technician';
+        newOrg = technicianDoc.data()?['organization'] ?? '-';
+      } else if (userDoc.exists) {
+        final userData = userDoc.data();
+        if (userData != null && userData['role'] == 'Technician') {
+          newRole = 'Technician';
+          newOrg = '-';
+        } else {
+          newRole = 'User';
+          newOrg = '-';
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _currentRole = newRole;
+          _organization = newOrg;
+        });
+      }
+    } catch (e) {
+      logger.e('Error getting user role: $e');
+    }
   }
 
   void _updateCategorySuggestions() {
@@ -84,10 +131,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         return;
       }
 
-      if (!mounted) {
-        logger.w('Widget not mounted, skipping confirmation dialog for $fileName');
-        return;
-      }
+      if (!mounted) return;
       final bool? confirmUpload = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -156,9 +200,11 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       final uploadTask = storageRef.putFile(file);
 
       uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
-        setState(() {
-          _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
-        });
+        if (mounted) {
+          setState(() {
+            _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
+          });
+        }
       }, onError: (e) {
         logger.e('Upload progress error: $e');
       });
@@ -190,9 +236,11 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       }
       logger.e('Error uploading document: $e');
     } finally {
-      setState(() {
-        _uploadProgress = null;
-      });
+      if (mounted) {
+        setState(() {
+          _uploadProgress = null;
+        });
+      }
     }
   }
 
@@ -310,7 +358,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       final frequencyMonths = int.parse(_frequencyController.text);
       final createdAt = DateTime.now();
       final nextDue = createdAt.add(Duration(days: frequencyMonths * 30));
-      final notificationDate = DateTime(nextDue.year, nextDue.month, nextDue.day, 9, 0); // 9:00 AM
+      final notificationDate = DateTime(nextDue.year, nextDue.month, nextDue.day, 9, 0);
 
       final task = MaintenanceTask(
         category: _categoryController.text,
@@ -327,7 +375,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         'facilityId': widget.facilityId,
       });
 
-      // Create notification using the enhanced notification service
       await _notificationService.scheduleNotification(
         category: task.category,
         component: task.component,
@@ -348,10 +395,12 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       _componentController.clear();
       _interventionController.clear();
       _frequencyController.clear();
-      setState(() {
-        _categorySuggestions = [];
-        _showScheduleForm = false;
-      });
+      if (mounted) {
+        setState(() {
+          _categorySuggestions = [];
+          _showScheduleForm = false;
+        });
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -421,12 +470,192 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     }
   }
 
+  @override
+  Widget build(BuildContext context) {
+    return ResponsiveScreenWrapper(
+      title: 'Schedule Maintenance',
+      facilityId: widget.facilityId,
+      currentRole: _currentRole,
+      organization: _organization,
+      floatingActionButton: !_showScheduleForm
+          ? FloatingActionButton.extended(
+              onPressed: () => setState(() => _showScheduleForm = true),
+              backgroundColor: Colors.blueGrey[800],
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: Text(
+                'Schedule New Task',
+                style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            )
+          : null,
+      child: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth <= 600;
+    final isTablet = screenWidth > 600 && screenWidth <= 900;
+    final padding = isMobile ? 16.0 : isTablet ? 24.0 : 32.0;
+    final fontSizeTitle = isMobile ? 20.0 : isTablet ? 24.0 : 28.0;
+    final fontSizeSubtitle = isMobile ? 14.0 : isTablet ? 16.0 : 18.0;
+
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(padding),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_showScheduleForm) _buildScheduleForm(),
+          Card(
+            elevation: 4,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: EdgeInsets.all(padding),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Upload Document',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      fontSize: fontSizeTitle,
+                      color: Colors.blueGrey[900],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  isMobile
+                      ? Column(
+                          children: [
+                            _buildUploadButton(fontSizeSubtitle),
+                          ],
+                        )
+                      : Row(
+                          children: [
+                            Expanded(
+                              child: _buildUploadButton(fontSizeSubtitle),
+                            ),
+                          ],
+                        ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Uploaded Documents',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      fontSize: fontSizeTitle,
+                      color: Colors.blueGrey[900],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('documents')
+                        .where('facilityId', isEqualTo: widget.facilityId)
+                        .orderBy('uploadedAt', descending: true)
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        logger.e('StreamBuilder error: ${snapshot.error}');
+                        return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
+                      }
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final docs = snapshot.data?.docs ?? [];
+                      if (docs.isEmpty) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Text('No documents uploaded yet', style: GoogleFonts.poppins()),
+                        );
+                      }
+                      return ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: docs.length,
+                        itemBuilder: (context, index) {
+                          final doc = docs[index];
+                          final fileName = doc['fileName'] as String;
+                          final downloadUrl = doc['downloadUrl'] as String;
+                          return Card(
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            margin: const EdgeInsets.symmetric(vertical: 6),
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              leading: Icon(
+                                _getFileIcon(fileName),
+                                color: _getFileIconColor(fileName),
+                                size: isMobile ? 32 : 36,
+                              ),
+                              title: Text(
+                                fileName,
+                                style: GoogleFonts.poppins(
+                                  color: Colors.blueGrey[900],
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: fontSizeSubtitle,
+                                ),
+                              ),
+                              trailing: PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'view') {
+                                    _viewDocument(downloadUrl, fileName);
+                                  } else if (value == 'download') {
+                                    _downloadDocument(downloadUrl, fileName);
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  PopupMenuItem(
+                                    value: 'view',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.visibility, color: Colors.blue[700], size: 20),
+                                        const SizedBox(width: 8),
+                                        Text('View', style: GoogleFonts.poppins()),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'download',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.download, color: Colors.green[700], size: 20),
+                                        const SizedBox(width: 8),
+                                        Text('Download', style: GoogleFonts.poppins()),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                                icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildScheduleForm() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth <= 600;
+    final isTablet = screenWidth > 600 && screenWidth <= 900;
+    final padding = isMobile ? 16.0 : isTablet ? 24.0 : 32.0;
+    final fontSizeTitle = isMobile ? 20.0 : isTablet ? 24.0 : 28.0;
+    final fontSizeInput = isMobile ? 14.0 : isTablet ? 16.0 : 18.0;
+
     return Card(
       elevation: 4,
-      margin: const EdgeInsets.all(16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: EdgeInsets.all(padding),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(padding),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -434,12 +663,16 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
               children: [
                 Text(
                   'Schedule New Task',
-                  style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: GoogleFonts.poppins(
+                    fontSize: fontSizeTitle,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blueGrey[900],
+                  ),
                 ),
                 const Spacer(),
                 IconButton(
                   onPressed: () => setState(() => _showScheduleForm = false),
-                  icon: const Icon(Icons.close),
+                  icon: const Icon(Icons.close, color: Colors.blueGrey),
                 ),
               ],
             ),
@@ -448,35 +681,22 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
               key: _formKey,
               child: Column(
                 children: [
-                  TextFormField(
+                  _buildTextField(
                     controller: _categoryController,
                     focusNode: _categoryFocus,
-                    textInputAction: TextInputAction.done,
-                    onFieldSubmitted: (_) => _submitCategorySearch(),
-                    decoration: InputDecoration(
-                      labelText: 'Category',
-                      suffixIcon: _categoryController.text.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear, color: Colors.blueGrey),
-                              onPressed: () {
-                                _categoryController.clear();
-                                _updateCategorySuggestions();
-                                _categoryFocus.unfocus();
-                              },
-                            )
-                          : null,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: Colors.grey[400]!, width: 1.0),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[100],
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                    ),
+                    labelText: 'Category',
+                    fontSize: fontSizeInput,
+                    onSubmitted: (_) => _submitCategorySearch(),
+                    suffixIcon: _categoryController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, color: Colors.blueGrey),
+                            onPressed: () {
+                              _categoryController.clear();
+                              _updateCategorySuggestions();
+                              _categoryFocus.unfocus();
+                            },
+                          )
+                        : null,
                     validator: (value) => value!.isEmpty ? 'Category is required' : null,
                   ),
                   if (_categoryController.text.isNotEmpty && _categorySuggestions.isNotEmpty)
@@ -500,7 +720,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                         itemBuilder: (context, index) {
                           final category = _categorySuggestions[index];
                           return ListTile(
-                            title: Text(category, style: GoogleFonts.poppins()),
+                            title: Text(category, style: GoogleFonts.poppins(fontSize: fontSizeInput)),
                             onTap: () {
                               _categoryController.text = category;
                               setState(() {
@@ -514,63 +734,27 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       ),
                     ),
                   const SizedBox(height: 16),
-                  TextFormField(
+                  _buildTextField(
                     controller: _componentController,
                     focusNode: _componentFocus,
-                    decoration: InputDecoration(
-                      labelText: 'Component',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: Colors.grey[400]!, width: 1.0),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[100],
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                    ),
+                    labelText: 'Component',
+                    fontSize: fontSizeInput,
                     validator: (value) => value!.isEmpty ? 'Component is required' : null,
                     maxLines: 2,
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
+                  _buildTextField(
                     controller: _interventionController,
-                    decoration: InputDecoration(
-                      labelText: 'Intervention',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: Colors.grey[400]!, width: 1.0),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[100],
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                    ),
+                    labelText: 'Intervention',
+                    fontSize: fontSizeInput,
                     validator: (value) => value!.isEmpty ? 'Intervention is required' : null,
                     maxLines: 4,
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
+                  _buildTextField(
                     controller: _frequencyController,
-                    decoration: InputDecoration(
-                      labelText: 'Frequency (months)',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: Colors.grey[400]!, width: 1.0),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[100],
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                    ),
+                    labelText: 'Frequency (months)',
+                    fontSize: fontSizeInput,
                     keyboardType: TextInputType.number,
                     validator: (value) {
                       if (value!.isEmpty) return 'Frequency is required';
@@ -580,13 +764,16 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 24),
                   Row(
                     children: [
                       Expanded(
                         child: TextButton(
                           onPressed: () => setState(() => _showScheduleForm = false),
-                          child: Text('Cancel', style: GoogleFonts.poppins()),
+                          child: Text(
+                            'Cancel',
+                            style: GoogleFonts.poppins(color: Colors.blueGrey[800], fontSize: fontSizeInput),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 16),
@@ -594,14 +781,14 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                         child: ElevatedButton(
                           onPressed: _saveTask,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blueGrey,
+                            backgroundColor: Colors.blueGrey[800],
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                           child: Text(
                             'Save Task',
-                            style: GoogleFonts.poppins(color: Colors.white),
+                            style: GoogleFonts.poppins(color: Colors.white, fontSize: fontSizeInput),
                           ),
                         ),
                       ),
@@ -616,180 +803,57 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return PopScope(
-      canPop: true,
-      child: Scaffold(
-        extendBodyBehindAppBar: false,
-        appBar: AppBar(
-          title: Text(
-            'Schedule Maintenance',
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          backgroundColor: Colors.blueGrey,
-          iconTheme: const IconThemeData(color: Colors.white),
-          leading: IconButton(
-            onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-          ),
-          elevation: 0,
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String labelText,
+    required double fontSize,
+    FocusNode? focusNode,
+    String? Function(String?)? validator,
+    int? maxLines,
+    TextInputType? keyboardType,
+    Function(String)? onSubmitted,
+    Widget? suffixIcon,
+  }) {
+    return TextFormField(
+      controller: controller,
+      focusNode: focusNode,
+      textInputAction: onSubmitted != null ? TextInputAction.done : TextInputAction.next,
+      onFieldSubmitted: onSubmitted,
+      decoration: InputDecoration(
+        labelText: labelText,
+        suffixIcon: suffixIcon,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: Colors.grey[400]!, width: 1.0),
         ),
-        body: Stack(
-          children: [
-            SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_showScheduleForm) _buildScheduleForm(),
-                  
-                  if (!_showScheduleForm) ...[
-                    Text(
-                      'Upload Document',
-                      style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    ElevatedButton.icon(
-                      onPressed: _uploadDocument,
-                      icon: const Icon(Icons.upload_file, color: Colors.white),
-                      label: Text(
-                        'Select Document',
-                        style: GoogleFonts.poppins(color: Colors.white),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueGrey,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Uploaded Documents',
-                          style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                        IconButton(
-                          icon: Icon(_isDocumentSectionExpanded ? Icons.expand_less : Icons.expand_more),
-                          onPressed: () {
-                            setState(() {
-                              _isDocumentSectionExpanded = !_isDocumentSectionExpanded;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                    if (_isDocumentSectionExpanded)
-                      StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance
-                            .collection('documents')
-                            .where('facilityId', isEqualTo: widget.facilityId)
-                            .orderBy('uploadedAt', descending: true)
-                            .snapshots(),
-                        builder: (context, snapshot) {
-                          logger.i('StreamBuilder snapshot: connectionState=${snapshot.connectionState}, hasError=${snapshot.hasError}, docCount=${snapshot.data?.docs.length ?? 0}, facilityId=${widget.facilityId}');
-                          if (snapshot.hasError) {
-                            logger.e('StreamBuilder error: ${snapshot.error}');
-                            return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
-                          }
-                          if (snapshot.connectionState == ConnectionState.waiting) {
-                            return const Center(child: CircularProgressIndicator());
-                          }
-                          final docs = snapshot.data?.docs ?? [];
-                          if (docs.isEmpty) {
-                            logger.w('No documents found for facilityId: ${widget.facilityId}');
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8.0),
-                              child: Text('No documents uploaded yet', style: GoogleFonts.poppins()),
-                            );
-                          }
-                          logger.i('Found ${docs.length} documents: ${docs.map((doc) => doc.data()).toList()}');
-                          return ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: docs.length,
-                            itemBuilder: (context, index) {
-                              final doc = docs[index];
-                              final fileName = doc['fileName'] as String;
-                              final downloadUrl = doc['downloadUrl'] as String;
-                              return Card(
-                                elevation: 2,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                margin: const EdgeInsets.symmetric(vertical: 6),
-                                child: ListTile(
-                                  leading: Icon(
-                                    _getFileIcon(fileName),
-                                    color: _getFileIconColor(fileName),
-                                    size: 32,
-                                  ),
-                                  title: Text(
-                                    fileName,
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.blueGrey[900],
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  trailing: PopupMenuButton<String>(
-                                    onSelected: (value) {
-                                      if (value == 'view') {
-                                        _viewDocument(downloadUrl, fileName);
-                                      } else if (value == 'download') {
-                                        _downloadDocument(downloadUrl, fileName);
-                                      }
-                                    },
-                                    itemBuilder: (context) => [
-                                      PopupMenuItem(
-                                        value: 'view',
-                                        child: Row(
-                                          children: [
-                                            Icon(Icons.visibility, color: Colors.blueGrey[700], size: 20),
-                                            const SizedBox(width: 8),
-                                            Text('View', style: GoogleFonts.poppins()),
-                                          ],
-                                        ),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'download',
-                                        child: Row(
-                                          children: [
-                                            Icon(Icons.download, color: Colors.green[700], size: 20),
-                                            const SizedBox(width: 8),
-                                            Text('Download', style: GoogleFonts.poppins()),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                    icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
-                                  ),
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      ),
-                  ],
-                ],
-              ),
-            ),
-          ],
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
         ),
-        floatingActionButton: !_showScheduleForm ? FloatingActionButton.extended(
-          onPressed: () => setState(() => _showScheduleForm = true),
-          backgroundColor: Colors.blueGrey,
-          icon: const Icon(Icons.add, color: Colors.white),
-          label: Text(
-            'Schedule New Task',
-            style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600),
-          ),
-          elevation: 8,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ) : null,
+        filled: true,
+        fillColor: Colors.grey[100],
+        contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
+      ),
+      style: GoogleFonts.poppins(fontSize: fontSize),
+      validator: validator,
+      maxLines: maxLines ?? 1,
+      keyboardType: keyboardType,
+    );
+  }
+
+  Widget _buildUploadButton(double fontSize) {
+    return ElevatedButton.icon(
+      onPressed: _uploadDocument,
+      icon: const Icon(Icons.upload_file, color: Colors.white),
+      label: Text(
+        'Select Document',
+        style: GoogleFonts.poppins(color: Colors.white, fontSize: fontSize),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.blueGrey[800],
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -806,20 +870,22 @@ class PDFViewerScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(fileName, style: GoogleFonts.poppins(color: Colors.white)),
-        backgroundColor: Colors.blueGrey,
+        backgroundColor: Colors.blueGrey[800],
         iconTheme: const IconThemeData(color: Colors.white),
       ),
-      body: PDFView(
-        filePath: filePath,
-        enableSwipe: true,
-        swipeHorizontal: false,
-        autoSpacing: true,
-        pageFling: true,
-        onError: (error) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error loading PDF: $error', style: GoogleFonts.poppins())),
-          );
-        },
+      body: SafeArea(
+        child: PDFView(
+          filePath: filePath,
+          enableSwipe: true,
+          swipeHorizontal: false,
+          autoSpacing: true,
+          pageFling: true,
+          onError: (error) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Error loading PDF: $error', style: GoogleFonts.poppins())),
+            );
+          },
+        ),
       ),
     );
   }
