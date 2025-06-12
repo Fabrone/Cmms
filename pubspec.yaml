@@ -38,6 +38,7 @@ dependencies:
   geocoding: ^4.0.0
   google_maps_flutter: ^2.12.2
   geolocator: ^14.0.1
+  async: ^2.13.0
 
 flutter:
   assets:
