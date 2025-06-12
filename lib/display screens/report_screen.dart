@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
+import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 
 class ReportScreen extends StatefulWidget {
   final String facilityId;
@@ -33,7 +34,6 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 
   void _initializeDataStream() {
-    // Initialize real-time data stream based on report type
     _dataStream = _getDataStream();
   }
 
@@ -44,7 +44,6 @@ class _ReportScreenState extends State<ReportScreen> {
         .doc(widget.facilityId)
         .collection(collection);
 
-    // Apply filters
     if (_statusFilter != 'All') {
       query = query.where('status', isEqualTo: _statusFilter);
     }
@@ -82,40 +81,36 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 
   Future<Map<String, dynamic>> _generateDetailedReport(List<QueryDocumentSnapshot> docs) async {
+    if (!mounted) return {};
+
     setState(() => _isGenerating = true);
-    
+
     try {
       _logger.i('Generating detailed report for ${docs.length} items');
-      
+
       final data = docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
-      
-      // Calculate summary statistics
+
       Map<String, int> statusCounts = {};
       Map<String, int> priorityCounts = {};
       Map<String, int> categoryCounts = {};
       Map<String, int> monthlyCounts = {};
-      
       double totalValue = 0;
       int totalQuantity = 0;
-      
+
       for (var item in data) {
-        // Status distribution
         final status = item['status'] as String? ?? 'Unknown';
         statusCounts[status] = (statusCounts[status] ?? 0) + 1;
-        
-        // Priority distribution (for work orders and requests)
+
         if (item.containsKey('priority')) {
           final priority = item['priority'] as String? ?? 'Unknown';
           priorityCounts[priority] = (priorityCounts[priority] ?? 0) + 1;
         }
-        
-        // Category distribution
+
         if (item.containsKey('category')) {
           final category = item['category'] as String? ?? 'Unknown';
           categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
         }
-        
-        // Monthly distribution
+
         if (item.containsKey('createdAt')) {
           final createdAt = (item['createdAt'] as Timestamp?)?.toDate();
           if (createdAt != null) {
@@ -123,8 +118,7 @@ class _ReportScreenState extends State<ReportScreen> {
             monthlyCounts[monthKey] = (monthlyCounts[monthKey] ?? 0) + 1;
           }
         }
-        
-        // Value calculations (for inventory)
+
         if (item.containsKey('cost')) {
           final cost = (item['cost'] as num?)?.toDouble() ?? 0;
           final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
@@ -132,8 +126,7 @@ class _ReportScreenState extends State<ReportScreen> {
           totalQuantity += quantity;
         }
       }
-      
-      // Calculate trends
+
       final sortedMonths = monthlyCounts.keys.toList()..sort();
       double trend = 0;
       if (sortedMonths.length >= 2) {
@@ -141,7 +134,7 @@ class _ReportScreenState extends State<ReportScreen> {
         final previous = monthlyCounts[sortedMonths[sortedMonths.length - 2]] ?? 0;
         trend = previous > 0 ? ((recent - previous) / previous * 100) : 0;
       }
-      
+
       final report = {
         'reportType': _reportType,
         'facilityId': widget.facilityId,
@@ -165,16 +158,23 @@ class _ReportScreenState extends State<ReportScreen> {
         },
         'data': data,
       };
-      
-      setState(() {
-        _lastGeneratedReport = report;
-        _isGenerating = false;
-      });
-      
+
+      if (mounted) {
+        setState(() {
+          _lastGeneratedReport = report;
+          _isGenerating = false;
+        });
+      }
+
       return report;
-    } catch (e) {
-      _logger.e('Error generating report: $e');
-      setState(() => _isGenerating = false);
+    } catch (e, stackTrace) {
+      _logger.e('Error generating report: $e', stackTrace: stackTrace);
+      if (mounted) {
+        setState(() => _isGenerating = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error generating report: $e', style: GoogleFonts.poppins())),
+        );
+      }
       return {};
     }
   }
@@ -209,389 +209,388 @@ class _ReportScreenState extends State<ReportScreen> {
     }
   }
 
+  void _clearFilters() {
+    setState(() {
+      _statusFilter = 'All';
+      _priorityFilter = 'All';
+      _categoryFilter = 'All';
+      _startDate = null;
+      _endDate = null;
+      _initializeDataStream();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          'Real-time Reports',
-          style: GoogleFonts.poppins(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        backgroundColor: Colors.blueGrey[800],
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: () {
-              setState(() {
-                _initializeDataStream();
-              });
-            },
-          ),
+    return ResponsiveScreenWrapper(
+      title: 'Real-time Reports',
+      facilityId: widget.facilityId,
+      currentRole: 'Engineer',
+      organization: '-',
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => setState(() => _initializeDataStream()),
+        backgroundColor: Colors.blueGrey[900],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        child: const Icon(Icons.refresh, color: Colors.white),
+      ),
+      child: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth <= 768;
+    final isTablet = screenWidth > 768 && screenWidth <= 1024;
+    final padding = isMobile ? 8.0 : isTablet ? 12.0 : 16.0;
+    final fontSizeTitle = isMobile ? 16.0 : isTablet ? 20.0 : 24.0;
+    final fontSize = isMobile ? 12.0 : isTablet ? 14.0 : 16.0;
+
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(padding),
+      child: Column(
+        children: [
+          _buildFilterSection(padding, fontSizeTitle: fontSizeTitle, fontSize: fontSize),
+          const SizedBox(height: 12),
+          _buildSummaryStatsSection(padding: padding, fontSize: fontSize),
+          const SizedBox(height: 12),
+          _buildDataList(fontSize: fontSize, padding: padding),
         ],
       ),
-      body: Column(
-        children: [
-          // Filter Controls
-          Container(
-            padding: const EdgeInsets.all(16.0),
-            color: Colors.grey[100],
-            child: Column(
+    );
+  }
+
+  Widget _buildFilterSection(double padding, {required double fontSizeTitle, required double fontSize}) {
+    final isMobile = MediaQuery.of(context).size.width <= 720;
+
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: EdgeInsets.all(padding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Report Type and Status Filter Row
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _reportType,
-                        items: ['Work Orders', 'Requests', 'Equipment', 'Inventory', 'Vendors']
-                            .map((r) => DropdownMenuItem(
-                                  value: r,
-                                  child: Text(r, style: GoogleFonts.poppins()),
-                                ))
-                            .toList(),
-                        onChanged: (value) {
-                          setState(() {
-                            _reportType = value!;
-                            _statusFilter = 'All';
-                            _priorityFilter = 'All';
-                            _categoryFilter = 'All';
-                            _initializeDataStream();
-                          });
-                        },
-                        decoration: InputDecoration(
-                          labelText: 'Report Type',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          filled: true,
-                          fillColor: Colors.white,
-                          labelStyle: GoogleFonts.poppins(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _statusFilter,
-                        items: _getAvailableFilters()
-                            .map((s) => DropdownMenuItem(
-                                  value: s,
-                                  child: Text(s, style: GoogleFonts.poppins()),
-                                ))
-                            .toList(),
-                        onChanged: (value) {
-                          setState(() {
-                            _statusFilter = value!;
-                            _initializeDataStream();
-                          });
-                        },
-                        decoration: InputDecoration(
-                          labelText: 'Status Filter',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          filled: true,
-                          fillColor: Colors.white,
-                          labelStyle: GoogleFonts.poppins(),
-                        ),
-                      ),
-                    ),
-                  ],
+                Text(
+                  'Report Filters',
+                  style: GoogleFonts.poppins(
+                    fontSize: fontSizeTitle,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blueGrey[900],
+                  ),
                 ),
-                const SizedBox(height: 12),
-                
-                // Priority and Category Filter Row
-                Row(
-                  children: [
-                    if (_reportType == 'Work Orders' || _reportType == 'Requests')
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _priorityFilter,
-                          items: ['All', 'High', 'Medium', 'Low']
-                              .map((p) => DropdownMenuItem(
-                                    value: p,
-                                    child: Text(p, style: GoogleFonts.poppins()),
-                                  ))
-                              .toList(),
-                          onChanged: (value) {
-                            setState(() {
-                              _priorityFilter = value!;
-                              _initializeDataStream();
-                            });
-                          },
-                          decoration: InputDecoration(
-                            labelText: 'Priority Filter',
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            filled: true,
-                            fillColor: Colors.white,
-                            labelStyle: GoogleFonts.poppins(),
-                          ),
-                        ),
-                      ),
-                    
-                    if (_reportType == 'Equipment' || _reportType == 'Inventory' || _reportType == 'Vendors')
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _categoryFilter,
-                          items: _getAvailableCategories()
-                              .map((c) => DropdownMenuItem(
-                                    value: c,
-                                    child: Text(c, style: GoogleFonts.poppins()),
-                                  ))
-                              .toList(),
-                          onChanged: (value) {
-                            setState(() {
-                              _categoryFilter = value!;
-                              _initializeDataStream();
-                            });
-                          },
-                          decoration: InputDecoration(
-                            labelText: 'Category Filter',
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            filled: true,
-                            fillColor: Colors.white,
-                            labelStyle: GoogleFonts.poppins(),
-                          ),
-                        ),
-                      ),
-                    
-                    if (_reportType != 'Work Orders' && _reportType != 'Requests' && 
-                        _reportType != 'Equipment' && _reportType != 'Inventory' && _reportType != 'Vendors')
-                      const Expanded(child: SizedBox()),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                
-                // Date Range Row
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: _startDate ?? DateTime.now(),
-                            firstDate: DateTime(2000),
-                            lastDate: DateTime(2100),
-                          );
-                          if (picked != null) {
-                            setState(() {
-                              _startDate = picked;
-                              _initializeDataStream();
-                            });
-                          }
-                        },
-                        icon: const Icon(Icons.calendar_today),
-                        label: Text(
-                          _startDate == null
-                              ? 'Start Date'
-                              : DateFormat.yMMMd().format(_startDate!),
-                          style: GoogleFonts.poppins(),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.blueGrey[800],
-                          side: BorderSide(color: Colors.blueGrey[300]!),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: _endDate ?? DateTime.now(),
-                            firstDate: DateTime(2000),
-                            lastDate: DateTime(2100),
-                          );
-                          if (picked != null) {
-                            setState(() {
-                              _endDate = picked;
-                              _initializeDataStream();
-                            });
-                          }
-                        },
-                        icon: const Icon(Icons.calendar_today),
-                        label: Text(
-                          _endDate == null
-                              ? 'End Date'
-                              : DateFormat.yMMMd().format(_endDate!),
-                          style: GoogleFonts.poppins(),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.blueGrey[800],
-                          side: BorderSide(color: Colors.blueGrey[300]!),
-                        ),
-                      ),
-                    ),
-                  ],
+                TextButton.icon(
+                  onPressed: _clearFilters,
+                  icon: const Icon(Icons.clear, size: 16, color: Colors.blueGrey),
+                  label: Text('Clear Filters', style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.blueGrey)),
+                  style: TextButton.styleFrom(foregroundColor: Colors.blueGrey[700]),
                 ),
               ],
             ),
-          ),
-          
-          // Real-time Data Display
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _dataStream,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Text(
-                      'Error: ${snapshot.error}',
-                      style: GoogleFonts.poppins(color: Colors.red),
-                    ),
-                  );
-                }
-                
-                final docs = snapshot.data?.docs ?? [];
-                
-                // Auto-generate report when data changes
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (!_isGenerating) {
-                    _generateDetailedReport(docs);
-                  }
-                });
-                
-                return Column(
-                  children: [
-                    // Live indicator
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      color: Colors.green[50],
-                      child: Row(
+            const SizedBox(height: 12),
+            isMobile
+                ? Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _buildDropdown('Report Type', _reportType, ['Work Orders', 'Requests', 'Equipment', 'Inventory', 'Vendors'], (value) {
+                        setState(() {
+                          _reportType = value!;
+                          _statusFilter = 'All';
+                          _priorityFilter = 'All';
+                          _categoryFilter = 'All';
+                          _initializeDataStream();
+                        });
+                      }, fontSize),
+                      _buildDropdown('Status', _statusFilter, _getAvailableFilters(), (value) {
+                        setState(() {
+                          _statusFilter = value!;
+                          _initializeDataStream();
+                        });
+                      }, fontSize),
+                      if (_reportType == 'Work Orders' || _reportType == 'Requests')
+                        _buildDropdown('Priority', _priorityFilter, ['All', 'High', 'Medium', 'Low'], (value) {
+                          setState(() {
+                            _priorityFilter = value!;
+                            _initializeDataStream();
+                          });
+                        }, fontSize),
+                      if (_reportType == 'Equipment' || _reportType == 'Inventory' || _reportType == 'Vendors')
+                        _buildDropdown('Category', _categoryFilter, _getAvailableCategories(), (value) {
+                          setState(() {
+                            _categoryFilter = value!;
+                            _initializeDataStream();
+                          });
+                        }, fontSize),
+                    ],
+                  )
+                : Column(
+                    children: [
+                      Row(
                         children: [
-                          const Icon(Icons.circle, color: Colors.green, size: 12),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Live Data - ${docs.length} items found',
-                            style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              color: Colors.green[700],
-                              fontWeight: FontWeight.w500,
-                            ),
+                          Expanded(
+                            child: _buildDropdown('Report Type', _reportType, ['Work Orders', 'Requests', 'Equipment', 'Inventory', 'Vendors'], (value) {
+                              setState(() {
+                                _reportType = value!;
+                                _statusFilter = 'All';
+                                _priorityFilter = 'All';
+                                _categoryFilter = 'All';
+                                _initializeDataStream();
+                              });
+                            }, fontSize),
                           ),
-                          const Spacer(),
-                          if (_isGenerating)
-                            Row(
-                              children: [
-                                SizedBox(
-                                  width: 12,
-                                  height: 12,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.green[700],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Generating...',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    color: Colors.green[700],
-                                  ),
-                                ),
-                              ],
-                            ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildDropdown('Status', _statusFilter, _getAvailableFilters(), (value) {
+                              setState(() {
+                                _statusFilter = value!;
+                                _initializeDataStream();
+                              });
+                            }, fontSize),
+                          ),
                         ],
                       ),
-                    ),
-                    
-                    // Report Summary
-                    if (_lastGeneratedReport != null)
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        color: Colors.blue[50],
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Report Summary',
-                              style: GoogleFonts.poppins(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blueGrey[800],
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            _buildSummaryStats(_lastGeneratedReport!),
-                          ],
-                        ),
-                      ),
-                    
-                    // Data List
-                    Expanded(
-                      child: docs.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.description_outlined,
-                                    size: 64,
-                                    color: Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'No data found for current filters',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 16,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          if (_reportType == 'Work Orders' || _reportType == 'Requests')
+                            Expanded(
+                              child: _buildDropdown('Priority', _priorityFilter, ['All', 'High', 'Medium', 'Low'], (value) {
+                                setState(() {
+                                  _priorityFilter = value!;
+                                  _initializeDataStream();
+                                });
+                              }, fontSize),
                             )
-                          : ListView.builder(
-                              padding: const EdgeInsets.all(16),
-                              itemCount: docs.length,
-                              itemBuilder: (context, index) {
-                                final item = docs[index].data() as Map<String, dynamic>;
-                                return _buildDataCard(item, index);
-                              },
-                            ),
-                    ),
-                  ],
+                          else
+                            const Expanded(child: SizedBox()),
+                          const SizedBox(width: 12),
+                          if (_reportType == 'Equipment' || _reportType == 'Inventory' || _reportType == 'Vendors')
+                            Expanded(
+                              child: _buildDropdown('Category', _categoryFilter, _getAvailableCategories(), (value) {
+                                setState(() {
+                                  _categoryFilter = value!;
+                                  _initializeDataStream();
+                                });
+                              }, fontSize),
+                            )
+                          else
+                            const Expanded(child: SizedBox()),
+                        ],
+                      ),
+                    ],
+                  ),
+            const SizedBox(height: 12),
+            isMobile
+                ? Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _buildDateButton('Start Date', _startDate, fontSize, true),
+                      _buildDateButton('End Date', _endDate, fontSize, false),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Expanded(child: _buildDateButton('Start Date', _startDate, fontSize, true)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _buildDateButton('End Date', _endDate, fontSize, false)),
+                    ],
+                  ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDropdown(String label, String value, List<String> items, ValueChanged<String?> onChanged, double fontSize) {
+    return DropdownButtonFormField<String>(
+      value: value,
+      items: items.map((s) => DropdownMenuItem(value: s, child: Text(s, style: GoogleFonts.poppins(fontSize: fontSize)))).toList(),
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        labelText: label,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
+        ),
+        filled: true,
+        fillColor: Colors.grey[50],
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        labelStyle: GoogleFonts.poppins(fontSize: fontSize, color: Colors.grey[600]),
+      ),
+      style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.blueGrey[900], fontWeight: FontWeight.w500),
+      dropdownColor: Colors.white,
+      icon: const Icon(Icons.arrow_drop_down, color: Colors.blueGrey),
+    );
+  }
+
+  Widget _buildDateButton(String label, DateTime? date, double fontSize, bool isStart) {
+    return ElevatedButton.icon(
+      onPressed: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: date ?? DateTime.now(),
+          firstDate: DateTime(2000),
+          lastDate: DateTime(2100),
+        );
+        if (picked != null && mounted) {
+          setState(() {
+            if (isStart) {
+              _startDate = picked;
+              if (_endDate != null && picked.isAfter(_endDate!)) {
+                _endDate = null;
+              }
+            } else {
+              if (_startDate == null || !picked.isBefore(_startDate!)) {
+                _endDate = picked;
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('End date must be after start date', style: GoogleFonts.poppins(fontSize: fontSize))),
                 );
-              },
-            ),
+              }
+            }
+            _initializeDataStream();
+          });
+        }
+      },
+      icon: const Icon(Icons.calendar_today, size: 16, color: Colors.blueGrey),
+      label: Text(
+        date == null ? label : DateFormat.yMMMd().format(date),
+        style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.blueGrey[900]),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.grey[50],
+        foregroundColor: Colors.blueGrey[900],
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        side: const BorderSide(color: Colors.blueGrey),
+      ),
+    );
+  }
+
+  Widget _buildSummaryStatsSection({required double padding, required double fontSize}) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _dataStream,
+      builder: (context, snapshot) {
+        _logger.i('StreamBuilder snapshot: connectionState=${snapshot.connectionState}, hasError=${snapshot.hasError}, docCount=${snapshot.data?.docs.length ?? 0}');
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          _logger.e('Firestore error: ${snapshot.error}');
+          return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.red));
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+        if (!_isGenerating && mounted) {
+          _generateDetailedReport(docs);
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildLiveIndicator(docs.length, fontSize: fontSize, padding: padding),
+            const SizedBox(height: 12),
+            if (_lastGeneratedReport != null) _buildSummarySection(_lastGeneratedReport!, fontSize: fontSize, padding: padding),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildLiveIndicator(int itemCount, {required double fontSize, required double padding}) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: padding, vertical: padding / 2),
+      color: Colors.green[50],
+      child: Row(
+        children: [
+          const Icon(Icons.circle, color: Colors.green, size: 12),
+          const SizedBox(width: 8),
+          Text(
+            'Live Data - $itemCount items found',
+            style: GoogleFonts.poppins(
+              fontSize: fontSize,
+              color: Colors.green[700],
+              fontWeight: FontWeight.w500),
           ),
+          const Spacer(),
+          if (_isGenerating)
+            Row(
+              children: [
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.green[700],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Generating...',
+                  style: GoogleFonts.poppins(
+                    fontSize: fontSize,
+                    color: Colors.green[700],
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildSummaryStats(Map<String, dynamic> report) {
+  Widget _buildSummarySection(Map<String, dynamic> report, {required double fontSize, required double padding}) {
     final summary = report['summary'] as Map<String, dynamic>;
-    
-    return Wrap(
-      spacing: 16,
-      runSpacing: 8,
-      children: [
-        _buildStatChip('Total Items', '${report['totalItems']}', Colors.blue),
-        if (summary['totalValue'] != null && summary['totalValue'] > 0)
-          _buildStatChip('Total Value', '\$${summary['totalValue'].toStringAsFixed(2)}', Colors.green),
-        if (summary['totalQuantity'] != null && summary['totalQuantity'] > 0)
-          _buildStatChip('Total Quantity', '${summary['totalQuantity']}', Colors.orange),
-        if (summary['trend'] != null)
-          _buildStatChip(
-            'Trend',
-            '${summary['trend'] > 0 ? '+' : ''}${summary['trend'].toStringAsFixed(1)}%',
-            summary['trend'] > 0 ? Colors.green : Colors.red,
-          ),
-      ],
+
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: EdgeInsets.all(padding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Report Summary',
+              style: GoogleFonts.poppins(
+                fontSize: fontSize + 2,
+                fontWeight: FontWeight.bold,
+                color: Colors.blueGrey[900],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildStatChip('Total Items', '${report['totalItems']}', Colors.blue, fontSize: fontSize),
+                if (summary['totalValue'] != null && summary['totalValue'] > 0)
+                  _buildStatChip('Total Value', '\$${summary['totalValue'].toStringAsFixed(2)}', Colors.green, fontSize: fontSize),
+                if (summary['totalQuantity'] != null && summary['totalQuantity'] > 0)
+                  _buildStatChip('Total Quantity', '${summary['totalQuantity']}', Colors.orange, fontSize: fontSize),
+                if (summary['totalQuantity'] != null && summary['totalQuantity'] > 0)
+                  _buildStatChip('Total Quantity', '${summary['totalQuantity']}', Colors.orange, fontSize: fontSize),
+                if (summary['trend'] != null)
+                  _buildStatChip(
+                    'Trend',
+                    '${summary['trend'] > 0 ? '+' : ''}${summary['trend'].toStringAsFixed(1)}%',
+                    summary['trend'] > 0 ? Colors.green : Colors.red,
+                    fontSize: fontSize,
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildStatChip(String label, String value, Color color) {
+  Widget _buildStatChip(String label, String value, Color color, {required double fontSize}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
@@ -605,7 +604,7 @@ class _ReportScreenState extends State<ReportScreen> {
           Text(
             label,
             style: GoogleFonts.poppins(
-              fontSize: 12,
+              fontSize: fontSize,
               color: color,
               fontWeight: FontWeight.w500,
             ),
@@ -614,7 +613,7 @@ class _ReportScreenState extends State<ReportScreen> {
           Text(
             value,
             style: GoogleFonts.poppins(
-              fontSize: 12,
+              fontSize: fontSize,
               color: color,
               fontWeight: FontWeight.bold,
             ),
@@ -624,51 +623,116 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 
-  Widget _buildDataCard(Map<String, dynamic> item, int index) {
+  Widget _buildDataList({required double fontSize, required double padding}) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _dataStream,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          _logger.e('Firestore error: ${snapshot.error}');
+          return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.red));
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+
+        return docs.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.description_outlined,
+                      size: 48,
+                      color: Colors.grey[400],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'No data found for current filters',
+                      style: GoogleFonts.poppins(
+                        fontSize: fontSize,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: docs.length,
+                itemBuilder: (context, index) {
+                  final item = docs[index].data() as Map<String, dynamic>;
+                  return _buildDataCard(item, index, fontSize: fontSize, padding: padding);
+                },
+              );
+      },
+    );
+  }
+
+  Widget _buildDataCard(Map<String, dynamic> item, int index, {required double fontSize, required double padding}) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: _getStatusColor(item['status'] ?? 'Unknown'),
-          child: Text(
-            '${index + 1}',
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-            ),
-          ),
-        ),
-        title: Text(
-          item['title'] ?? item['name'] ?? 'Item ${index + 1}',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: EdgeInsets.symmetric(vertical: padding / 2),
+      child: Padding(
+        padding: EdgeInsets.all(padding),
+        child: Row(
           children: [
-            Text(
-              'Status: ${item['status'] ?? 'N/A'}',
-              style: GoogleFonts.poppins(fontSize: 12),
+            CircleAvatar(
+              backgroundColor: _getStatusColor(item['status'] ?? 'Unknown'),
+              radius: 16,
+              child: Text(
+                '${index + 1}',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: fontSize - 2,
+                ),
+              ),
             ),
-            if (item['priority'] != null)
-              Text(
-                'Priority: ${item['priority']}',
-                style: GoogleFonts.poppins(fontSize: 12),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item['title'] ?? item['name'] ?? 'Item ${index + 1}',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w600,
+                      fontSize: fontSize,
+                      color: Colors.blueGrey[900],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Status: ${item['status'] ?? 'N/A'}',
+                    style: GoogleFonts.poppins(fontSize: fontSize - 2, color: Colors.grey[600]),
+                  ),
+                  if (item['priority'] != null)
+                    Text(
+                      'Priority: ${item['priority']}',
+                      style: GoogleFonts.poppins(fontSize: fontSize - 2, color: Colors.grey[600]),
+                    ),
+                  if (item['category'] != null)
+                    Text(
+                      'Category: ${item['category']}',
+                      style: GoogleFonts.poppins(fontSize: fontSize - 2, color: Colors.grey[600]),
+                    ),
+                  Text(
+                    'Created: ${item['createdAt'] != null ? DateFormat.yMMMd().format((item['createdAt'] as Timestamp).toDate()) : 'N/A'}',
+                    style: GoogleFonts.poppins(fontSize: fontSize - 2, color: Colors.grey[600]),
+                  ),
+                ],
               ),
-            if (item['category'] != null)
-              Text(
-                'Category: ${item['category']}',
-                style: GoogleFonts.poppins(fontSize: 12),
-              ),
-            Text(
-              'Created: ${item['createdAt'] != null ? DateFormat.yMMMd().format((item['createdAt'] as Timestamp).toDate()) : 'N/A'}',
-              style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]),
+            ),
+            Icon(
+              Icons.chevron_right,
+              color: Colors.grey[400],
+              size: 20,
             ),
           ],
-        ),
-        trailing: Icon(
-          Icons.chevron_right,
-          color: Colors.grey[400],
         ),
       ),
     );
@@ -677,23 +741,23 @@ class _ReportScreenState extends State<ReportScreen> {
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
       case 'open':
-        return Colors.blue;
+        return Colors.blue.shade600;
       case 'in progress':
-        return Colors.orange;
+        return Colors.orange.shade600;
       case 'closed':
-        return Colors.green;
+        return Colors.green.shade600;
       case 'active':
-        return Colors.green;
+        return Colors.green.shade600;
       case 'inactive':
-        return Colors.grey;
+        return Colors.grey.shade600;
       case 'under repair':
-        return Colors.red;
+        return Colors.red.shade600;
       case 'low stock':
-        return Colors.orange;
+        return Colors.orange.shade600;
       case 'out of stock':
-        return Colors.red;
+        return Colors.red.shade600;
       default:
-        return Colors.grey;
+        return Colors.grey.shade600;
     }
   }
 }
