@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cmms/models/reports.dart';
+import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -28,12 +29,58 @@ class _ReportsScreenState extends State<ReportsScreen> {
   final logger = Logger(printer: PrettyPrinter());
   final TextEditingController _titleController = TextEditingController();
   double? _uploadProgress;
-  final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
+  String _currentRole = 'User';
+  String _organization = '-';
 
   @override
   void initState() {
     super.initState();
+    _getCurrentUserRole();
     logger.i('ReportsScreen initialized with facilityId: ${widget.facilityId}');
+  }
+
+  Future<void> _getCurrentUserRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
+      final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
+      final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance.collection('Users').doc(user.uid).get();
+
+      String newRole = 'User';
+      String newOrg = '-';
+
+      if (adminDoc.exists) {
+        newRole = 'Admin';
+        newOrg = adminDoc.data()?['organization'] ?? '-';
+      } else if (developerDoc.exists) {
+        newRole = 'Technician';
+        newOrg = 'JV Almacis';
+      } else if (technicianDoc.exists) {
+        newRole = 'Technician';
+        newOrg = technicianDoc.data()?['organization'] ?? '-';
+      } else if (userDoc.exists) {
+        final userData = userDoc.data();
+        if (userData != null && userData['role'] == 'Technician') {
+          newRole = 'Technician';
+          newOrg = '-';
+        } else {
+          newRole = 'User';
+          newOrg = '-';
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _currentRole = newRole;
+          _organization = newOrg;
+        });
+      }
+    } catch (e) {
+      logger.e('Error getting user role: $e');
+    }
   }
 
   @override
@@ -135,9 +182,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final uploadTask = storageRef.putFile(file);
 
       uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
-        setState(() {
-          _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
-        });
+        if (mounted) {
+          setState(() {
+            _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
+          });
+        }
       }, onError: (e) {
         logger.e('Upload progress error: $e');
       });
@@ -155,7 +204,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       });
 
       if (mounted) {
-        Navigator.pop(context); // Close progress dialog
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Report uploaded successfully', style: GoogleFonts.poppins())),
         );
@@ -164,16 +213,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
       logger.i('Uploaded report: $fileName, URL: $downloadUrl, facilityId: ${widget.facilityId}');
     } catch (e) {
       if (mounted) {
-        Navigator.pop(context); // Close progress dialog
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error uploading report: $e', style: GoogleFonts.poppins())),
         );
       }
       logger.e('Error uploading report: $e');
     } finally {
-      setState(() {
-        _uploadProgress = null;
-      });
+      if (mounted) {
+        setState(() {
+          _uploadProgress = null;
+        });
+      }
     }
   }
 
@@ -288,6 +339,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Future<void> _deleteDocument(String downloadUrl, String fileName, String docId) async {
+    if (!mounted) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -340,195 +392,203 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return ResponsiveScreenWrapper(
+      title: 'Reports',
+      facilityId: widget.facilityId,
+      currentRole: _currentRole,
+      organization: _organization,
+      child: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth <= 600;
     final isTablet = screenWidth > 600 && screenWidth <= 900;
     final padding = isMobile ? 16.0 : isTablet ? 24.0 : 32.0;
     final fontSizeTitle = isMobile ? 20.0 : isTablet ? 24.0 : 28.0;
     final fontSizeSubtitle = isMobile ? 14.0 : isTablet ? 16.0 : 18.0;
-    final inputFontSize = isMobile ? 14.0 : 16.0;
 
-    return ScaffoldMessenger(
-      key: _messengerKey,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            'Reports',
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: fontSizeTitle,
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(padding),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Card(
+            elevation: 4,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: EdgeInsets.all(padding),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Upload Report',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      fontSize: fontSizeTitle,
+                      color: Colors.blueGrey[900],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  isMobile
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildTextField(fontSizeSubtitle),
+                            const SizedBox(height: 12),
+                            _buildUploadButton(fontSizeSubtitle),
+                          ],
+                        )
+                      : Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: _buildTextField(fontSizeSubtitle),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 1,
+                              child: _buildUploadButton(fontSizeSubtitle),
+                            ),
+                          ],
+                        ),
+                ],
+              ),
             ),
           ),
-          backgroundColor: Colors.blueGrey[800],
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () => Navigator.pop(context),
-          ),
-          elevation: 0,
-        ),
-        body: SafeArea(
-          child: SingleChildScrollView(
-            padding: EdgeInsets.all(padding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Upload Report',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold,
-                    fontSize: fontSizeTitle,
-                    color: Colors.blueGrey[900],
+          const SizedBox(height: 24),
+          Card(
+            elevation: 4,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: EdgeInsets.all(padding),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Uploaded Reports',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      fontSize: fontSizeTitle,
+                      color: Colors.blueGrey[900],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                isMobile
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildTextField(inputFontSize),
-                          const SizedBox(height: 12),
-                          _buildUploadButton(inputFontSize),
-                        ],
-                      )
-                    : Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: _buildTextField(inputFontSize),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            flex: 1,
-                            child: _buildUploadButton(inputFontSize),
-                          ),
-                        ],
-                      ),
-                const SizedBox(height: 24),
-                Text(
-                  'Uploaded Reports',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold,
-                    fontSize: fontSizeTitle,
-                    color: Colors.blueGrey[900],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('Reports')
-                      .where('facilityId', isEqualTo: widget.facilityId)
-                      .orderBy('uploadedAt', descending: true)
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    logger.i('StreamBuilder snapshot: connectionState=${snapshot.connectionState}, hasError=${snapshot.hasError}, docCount=${snapshot.data?.docs.length ?? 0}, facilityId=${widget.facilityId}');
-                    if (snapshot.hasError) {
-                      logger.e('StreamBuilder error: ${snapshot.error}');
-                      return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
-                    }
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    final docs = snapshot.data?.docs ?? [];
-                    if (docs.isEmpty) {
-                      logger.w('No reports found for facilityId: ${widget.facilityId}');
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8.0),
-                        child: Text('No reports uploaded yet', style: GoogleFonts.poppins()),
-                      );
-                    }
-                    logger.i('Found ${docs.length} reports: ${docs.map((doc) => doc.data()).toList()}');
-                    return ListView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: docs.length,
-                      itemBuilder: (context, index) {
-                        final report = Report.fromSnapshot(docs[index]);
-                        return Card(
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          margin: const EdgeInsets.symmetric(vertical: 6),
-                          child: ListTile(
-                            leading: Icon(
-                              _getFileIcon(report.fileName),
-                              color: _getFileIconColor(report.fileName),
-                              size: isMobile ? 32 : 36,
-                            ),
-                            title: Text(
-                              report.title,
-                              style: GoogleFonts.poppins(
-                                color: Colors.blueGrey[900],
-                                fontWeight: FontWeight.w500,
-                                fontSize: fontSizeSubtitle,
-                              ),
-                            ),
-                            subtitle: Text(
-                              'Uploaded: ${report.uploadedAt != null ? DateFormat('MMM dd, yyyy').format(report.uploadedAt!) : 'Unknown date'}',
-                              style: GoogleFonts.poppins(
-                                fontSize: isMobile ? 12 : 14,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                            trailing: PopupMenuButton<String>(
-                              onSelected: (value) {
-                                if (value == 'view') {
-                                  _viewDocument(report.downloadUrl, report.fileName);
-                                } else if (value == 'download') {
-                                  _downloadDocument(report.downloadUrl, report.fileName);
-                                } else if (value == 'delete') {
-                                  _deleteDocument(report.downloadUrl, report.fileName, report.id);
-                                }
-                              },
-                              itemBuilder: (context) => [
-                                PopupMenuItem(
-                                  value: 'view',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.visibility, color: Colors.blue[700], size: 20),
-                                      const SizedBox(width: 8),
-                                      Text('View', style: GoogleFonts.poppins()),
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem(
-                                  value: 'download',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.download, color: Colors.green[700], size: 20),
-                                      const SizedBox(width: 8),
-                                      Text('Download', style: GoogleFonts.poppins()),
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem(
-                                  value: 'delete',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.delete, color: Colors.red[700], size: 20),
-                                      const SizedBox(width: 8),
-                                      Text('Delete', style: GoogleFonts.poppins()),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
-                            ),
-                          ),
+                  const SizedBox(height: 16),
+                  StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('Reports')
+                        .where('facilityId', isEqualTo: widget.facilityId)
+                        .orderBy('uploadedAt', descending: true)
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        logger.e('StreamBuilder error: ${snapshot.error}');
+                        return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
+                      }
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final docs = snapshot.data?.docs ?? [];
+                      if (docs.isEmpty) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Text('No reports uploaded yet', style: GoogleFonts.poppins()),
                         );
-                      },
-                    );
-                  },
-                ),
-              ],
+                      }
+                      return ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: docs.length,
+                        itemBuilder: (context, index) {
+                          final report = Report.fromSnapshot(docs[index]);
+                          return Card(
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            margin: const EdgeInsets.symmetric(vertical: 6),
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              leading: Icon(
+                                _getFileIcon(report.fileName),
+                                color: _getFileIconColor(report.fileName),
+                                size: isMobile ? 32 : 36,
+                              ),
+                              title: Text(
+                                report.title,
+                                style: GoogleFonts.poppins(
+                                  color: Colors.blueGrey[900],
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: fontSizeSubtitle,
+                                ),
+                              ),
+                              subtitle: Text(
+                                'Uploaded: ${report.uploadedAt != null ? DateFormat('MMM dd, yyyy').format(report.uploadedAt!) : 'Unknown date'}',
+                                style: GoogleFonts.poppins(
+                                  fontSize: isMobile ? 12 : 14,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                              trailing: PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'view') {
+                                    _viewDocument(report.downloadUrl, report.fileName);
+                                  } else if (value == 'download') {
+                                    _downloadDocument(report.downloadUrl, report.fileName);
+                                  } else if (value == 'delete') {
+                                    _deleteDocument(report.downloadUrl, report.fileName, report.id);
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  PopupMenuItem(
+                                    value: 'view',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.visibility, color: Colors.blue[700], size: 20),
+                                        const SizedBox(width: 8),
+                                        Text('View', style: GoogleFonts.poppins()),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'download',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.download, color: Colors.green[700], size: 20),
+                                        const SizedBox(width: 8),
+                                        Text('Download', style: GoogleFonts.poppins()),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.delete, color: Colors.red[700], size: 20),
+                                        const SizedBox(width: 8),
+                                        Text('Delete', style: GoogleFonts.poppins()),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                                icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 
   Widget _buildTextField(double fontSize) {
-    return TextField(
+    return TextFormField(
       controller: _titleController,
       decoration: InputDecoration(
         labelText: 'Report Title (Optional)',
@@ -538,7 +598,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.blueGrey[800]!, width: 2),
+          borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
         ),
         filled: true,
         fillColor: Colors.grey[100],
@@ -562,8 +622,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
         backgroundColor: Colors.blueGrey[800],
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        elevation: 4,
       ),
     );
   }
