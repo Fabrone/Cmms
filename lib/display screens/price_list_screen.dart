@@ -197,7 +197,7 @@ class _PriceListScreenState extends State<PriceListScreen> {
       await uploadTask;
       final downloadUrl = await storageRef.getDownloadURL();
 
-      await FirebaseFirestore.instance.collection('price_list').add({
+      await FirebaseFirestore.instance.collection('PriceList').add({
         'userId': user.uid,
         'title': title,
         'fileName': fileName,
@@ -357,7 +357,7 @@ class _PriceListScreenState extends State<PriceListScreen> {
 
     try {
       await FirebaseStorage.instance.refFromURL(downloadUrl).delete();
-      await FirebaseFirestore.instance.collection('price_list').doc(docId).delete();
+      await FirebaseFirestore.instance.collection('PriceList').doc(docId).delete();
       if (mounted) _showSnackBar('Price list deleted successfully');
       logger.i('Deleted price list: $fileName, docId: $docId');
     } catch (e, stackTrace) {
@@ -431,7 +431,7 @@ class _PriceListScreenState extends State<PriceListScreen> {
           const SizedBox(height: 16),
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
-                .collection('price_list')
+                .collection('PriceList')
                 .where('facilityId', isEqualTo: widget.facilityId)
                 .orderBy('uploadedAt', descending: true)
                 .snapshots(),

@@ -153,7 +153,7 @@ class _BillingScreenState extends State<BillingScreen> {
       await uploadTask;
       final downloadUrl = await storageRef.getDownloadURL();
 
-      await FirebaseFirestore.instance.collection('billing_data').add({
+      await FirebaseFirestore.instance.collection('BillingData').add({
         'userId': user.uid,
         'title': title,
         'fileName': fileName,
@@ -297,7 +297,7 @@ class _BillingScreenState extends State<BillingScreen> {
     }
 
     try {
-      await FirebaseFirestore.instance.collection('billing_data').doc(docId).update({
+      await FirebaseFirestore.instance.collection('BillingData').doc(docId).update({
         'status': newStatus,
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -322,7 +322,7 @@ class _BillingScreenState extends State<BillingScreen> {
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      await FirebaseFirestore.instance.collection('billing_data').doc(docId).update({
+      await FirebaseFirestore.instance.collection('BillingData').doc(docId).update({
         'approvalStatus': approvalStatus,
         'approvalNotes': notes,
         'approvedBy': user?.email ?? user?.uid,
@@ -407,7 +407,7 @@ class _BillingScreenState extends State<BillingScreen> {
           const SizedBox(height: 16),
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
-                .collection('billing_data')
+                .collection('BillingData')
                 .where('facilityId', isEqualTo: widget.facilityId)
                 .orderBy('uploadedAt', descending: true)
                 .snapshots(),
