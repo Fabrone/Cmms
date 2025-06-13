@@ -79,11 +79,11 @@ class _VendorScreenState extends State<VendorScreen> {
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
         createdBy: user.uid,
+        userId: user.uid,
+        facilityId: widget.facilityId,
       );
 
       await FirebaseFirestore.instance
-          .collection('Facilities')
-          .doc(widget.facilityId)
           .collection('Vendors')
           .doc(vendorId)
           .set(vendor.toMap());
@@ -112,8 +112,6 @@ class _VendorScreenState extends State<VendorScreen> {
     try {
       _logger.i('Adding service history: docId=$docId, service=$service');
       await FirebaseFirestore.instance
-          .collection('Facilities')
-          .doc(widget.facilityId)
           .collection('Vendors')
           .doc(docId)
           .update({
@@ -147,8 +145,6 @@ class _VendorScreenState extends State<VendorScreen> {
     try {
       _logger.i('Updating vendor rating: docId=$docId, rating=$newRating');
       await FirebaseFirestore.instance
-          .collection('Facilities')
-          .doc(widget.facilityId)
           .collection('Vendors')
           .doc(docId)
           .update({
@@ -183,8 +179,6 @@ class _VendorScreenState extends State<VendorScreen> {
     try {
       _logger.i('Updating vendor status: docId=$docId, status=$newStatus');
       await FirebaseFirestore.instance
-          .collection('Facilities')
-          .doc(widget.facilityId)
           .collection('Vendors')
           .doc(docId)
           .update({
@@ -433,8 +427,7 @@ class _VendorScreenState extends State<VendorScreen> {
           itemBuilder: (context, index) {
             final vendor = Vendor.fromSnapshot(docs[index]);
             return Card(
-              elevation: 4,
-              margin: EdgeInsets.only(bottom: padding),
+              elevation: 4.0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: ExpansionTile(
                 leading: CircleAvatar(
@@ -512,9 +505,8 @@ class _VendorScreenState extends State<VendorScreen> {
 
   Stream<QuerySnapshot> _buildVendorStream() {
     Query query = FirebaseFirestore.instance
-        .collection('Facilities')
-        .doc(widget.facilityId)
-        .collection('Vendors');
+        .collection('Vendors')
+        .where('facilityId', isEqualTo: widget.facilityId);
 
     if (_categoryFilter != 'All') {
       query = query.where('category', isEqualTo: _categoryFilter);
@@ -765,7 +757,7 @@ class _VendorScreenState extends State<VendorScreen> {
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.amber[700],
+                backgroundColor: Colors.amber[600],
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               child: Text('Update Rating', style: GoogleFonts.poppins(color: Colors.white)),
