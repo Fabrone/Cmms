@@ -82,9 +82,9 @@ class _VendorScreenState extends State<VendorScreen> {
       );
 
       await FirebaseFirestore.instance
-          .collection('facilities')
+          .collection('Facilities')
           .doc(widget.facilityId)
-          .collection('vendors')
+          .collection('Vendors')
           .doc(vendorId)
           .set(vendor.toMap());
 
@@ -112,9 +112,9 @@ class _VendorScreenState extends State<VendorScreen> {
     try {
       _logger.i('Adding service history: docId=$docId, service=$service');
       await FirebaseFirestore.instance
-          .collection('facilities')
+          .collection('Facilities')
           .doc(widget.facilityId)
-          .collection('vendors')
+          .collection('Vendors')
           .doc(docId)
           .update({
         'serviceHistory': FieldValue.arrayUnion([
@@ -147,9 +147,9 @@ class _VendorScreenState extends State<VendorScreen> {
     try {
       _logger.i('Updating vendor rating: docId=$docId, rating=$newRating');
       await FirebaseFirestore.instance
-          .collection('facilities')
+          .collection('Facilities')
           .doc(widget.facilityId)
-          .collection('vendors')
+          .collection('Vendors')
           .doc(docId)
           .update({
         'rating': newRating,
@@ -183,9 +183,9 @@ class _VendorScreenState extends State<VendorScreen> {
     try {
       _logger.i('Updating vendor status: docId=$docId, status=$newStatus');
       await FirebaseFirestore.instance
-          .collection('facilities')
+          .collection('Facilities')
           .doc(widget.facilityId)
-          .collection('vendors')
+          .collection('Vendors')
           .doc(docId)
           .update({
         'status': newStatus,
@@ -512,9 +512,9 @@ class _VendorScreenState extends State<VendorScreen> {
 
   Stream<QuerySnapshot> _buildVendorStream() {
     Query query = FirebaseFirestore.instance
-        .collection('facilities')
+        .collection('Facilities')
         .doc(widget.facilityId)
-        .collection('vendors');
+        .collection('Vendors');
 
     if (_categoryFilter != 'All') {
       query = query.where('category', isEqualTo: _categoryFilter);
