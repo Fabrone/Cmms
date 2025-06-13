@@ -16,6 +16,8 @@ class Vendor {
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final String createdBy;
+  final String userId;
+  final String facilityId;
 
   Vendor({
     required this.id,
@@ -33,6 +35,8 @@ class Vendor {
     this.createdAt,
     this.updatedAt,
     required this.createdBy,
+    required this.userId,
+    required this.facilityId,
   });
 
   factory Vendor.fromSnapshot(DocumentSnapshot doc) {
@@ -51,10 +55,13 @@ class Vendor {
       status: data['status'] ?? 'Active',
       serviceHistory: (data['serviceHistory'] as List<dynamic>?)
           ?.map((item) => Map<String, dynamic>.from(item as Map))
-          .toList() ?? [],
+          .toList() ??
+          [],
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
       createdBy: data['createdBy'] ?? '',
+      userId: data['userId'] ?? '',
+      facilityId: data['facilityId'] ?? '',
     );
   }
 
@@ -74,6 +81,8 @@ class Vendor {
       'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : null,
       'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
       'createdBy': createdBy,
+      'userId': userId,
+      'facilityId': facilityId,
     };
   }
 }
