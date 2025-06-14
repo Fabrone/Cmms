@@ -21,6 +21,7 @@ import 'package:cmms/display%20screens/kpi_screen.dart';
 import 'package:cmms/display%20screens/report_screen.dart';
 import 'package:cmms/screens/settings_screen.dart';
 import 'package:cmms/screens/user_screen.dart';
+import 'package:cmms/developer/developer_screen.dart'; // Added for developers
 
 class ResponsiveScreenWrapper extends StatefulWidget {
   final String title;
@@ -28,6 +29,7 @@ class ResponsiveScreenWrapper extends StatefulWidget {
   final String facilityId;
   final String? currentRole;
   final String? organization;
+  final bool isDeveloper; // Added for developer-specific features
   final List<Widget>? actions;
   final Widget? floatingActionButton;
   final VoidCallback? onFacilityReset;
@@ -39,6 +41,7 @@ class ResponsiveScreenWrapper extends StatefulWidget {
     required this.facilityId,
     this.currentRole,
     this.organization,
+    this.isDeveloper = false,
     this.actions,
     this.floatingActionButton,
     this.onFacilityReset,
@@ -51,7 +54,6 @@ class ResponsiveScreenWrapper extends StatefulWidget {
 class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   final Logger _logger = Logger(printer: PrettyPrinter());
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  
   String _currentRole = 'User';
   String _organization = '-';
 
@@ -72,25 +74,22 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
       final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
       final userDoc = await FirebaseFirestore.instance.collection('Users').doc(user.uid).get();
-      
+
       String newRole = 'User';
       String newOrg = '-';
-      
+
       if (adminDoc.exists) {
         newRole = 'Admin';
         final adminData = adminDoc.data();
         newOrg = adminData?['organization'] ?? '-';
-      } 
-      else if (developerDoc.exists) {
+      } else if (developerDoc.exists) {
         newRole = 'Technician';
         newOrg = 'JV Almacis';
-      }
-      else if (technicianDoc.exists) {
+      } else if (technicianDoc.exists) {
         newRole = 'Technician';
         final techData = technicianDoc.data();
         newOrg = techData?['organization'] ?? '-';
-      }
-      else if (userDoc.exists) {
+      } else if (userDoc.exists) {
         final userData = userDoc.data();
         if (userData != null && userData['role'] == 'Technician') {
           newRole = 'Technician';
@@ -100,7 +99,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           newOrg = '-';
         }
       }
-      
+
       if (mounted) {
         setState(() {
           _currentRole = newRole;
@@ -181,12 +180,26 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   }
 
   Widget _buildAppIcon() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      child: Image.asset(
-        'assets/icons/icon.png',
-        width: 60,
-        height: 60,
+    return InkWell(
+      onTap: widget.isDeveloper
+          ? () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const DeveloperScreen()),
+              );
+              if (MediaQuery.of(context).size.width <= 600) {
+                Navigator.pop(context); // Close drawer on mobile
+              }
+              _logger.i('Developer navigated to DeveloperScreen');
+            }
+          : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Image.asset(
+          'assets/icons/icon.png',
+          width: 60,
+          height: 60,
+        ),
       ),
     );
   }
@@ -194,8 +207,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   List<Widget> _buildMenuItems() {
     final role = _currentRole;
     final org = _organization;
-    
-    // Role-specific menu access - EXCLUDING Profile, About, Help & Support
+
     final Map<String, Map<String, List<String>>> roleMenuAccess = {
       'Admin': {
         'Embassy': [
@@ -254,57 +266,40 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
     final allowedItems = roleMenuAccess[role]?[org] ?? roleMenuAccess['User']!['-']!;
     final List<Widget> menuWidgets = [];
-    
+
     for (var menuItem in menuStructure) {
       final itemTitle = menuItem['title'] as String;
-      
-      // Skip items not allowed for this role/organization
       if (!allowedItems.contains(itemTitle)) {
         continue;
       }
-      
       final icon = menuItem['icon'] as IconData;
       final isSubItem = menuItem['isSubItem'] as bool;
-      
-      // Special handling for "Facilities" item
-      if (itemTitle == 'Facilities') {
-        menuWidgets.add(
-          ListTile(
-            leading: Icon(icon, color: Colors.blueGrey),
-            title: Text(itemTitle, style: GoogleFonts.poppins()),
-            onTap: () {
-              if (widget.onFacilityReset != null) {
-                widget.onFacilityReset!();
-              } else {
-                Navigator.pop(context);
-              }
-            },
-          ),
-        );
-        continue;
-      }
-      
+
       menuWidgets.add(
         ListTile(
-          contentPadding: isSubItem 
-              ? const EdgeInsets.only(left: 32.0, right: 16.0)
-              : null,
+          contentPadding: isSubItem ? const EdgeInsets.only(left: 32.0, right: 16.0) : null,
           leading: Icon(icon, color: Colors.blueGrey),
           title: Text(itemTitle, style: GoogleFonts.poppins()),
           onTap: () => _handleMenuNavigation(itemTitle),
         ),
       );
     }
-    
+
     return menuWidgets;
   }
 
   void _handleMenuNavigation(String title) {
-    // Close drawer if open on mobile
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth <= 600;
     if (isMobile) {
       Navigator.pop(context);
+    }
+
+    if (title == 'Facilities') {
+      if (widget.onFacilityReset != null) {
+        widget.onFacilityReset!();
+        return;
+      }
     }
 
     if (widget.facilityId.isEmpty && !['Settings'].contains(title)) {
