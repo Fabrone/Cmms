@@ -44,6 +44,15 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
+  // Clear Firestore persistence before any Firestore operations
+  final logger = Logger();
+  try {
+    await FirebaseFirestore.instance.clearPersistence();
+    logger.i('Firestore cache cleared on app start');
+  } catch (e, stackTrace) {
+    logger.e('Error clearing Firestore cache: $e', stackTrace: stackTrace);
+  }
+
   // Set up background message handler
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
@@ -67,13 +76,6 @@ void main() async {
   // Initialize the notification service
   await NotificationService().initialize();
 
-  final logger = Logger();
-  try {
-    await FirebaseFirestore.instance.clearPersistence();
-    logger.i('Firestore cache cleared on app start');
-  } catch (e, stackTrace) {
-    logger.e('Error clearing Firestore cache: $e', stackTrace: stackTrace);
-  }
   runApp(const MyApp());
 }
 
@@ -136,10 +138,8 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-// Remove default facility
-
     return MaterialApp(
-      title: 'Swedish Embassy Facility Management',
+      title: 'Facility Management System',
       navigatorKey: navigatorKey,
       theme: ThemeData(
         primarySwatch: Colors.blue,
@@ -150,7 +150,7 @@ class _MyAppState extends State<MyApp> {
       routes: {
         '/home': (context) {
           final args = ModalRoute.of(context)?.settings.arguments as String?;
-          return DashboardScreen(facilityId: args ?? '', role: '',);
+          return DashboardScreen(facilityId: args ?? '', role: '');
         },
         '/login': (context) => const LoginScreen(),
         '/registration': (context) => const RegistrationScreen(),

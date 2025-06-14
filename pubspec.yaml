@@ -1,13 +1,9 @@
 name: cmms
 description: A CMMS Flutter application.
-
 publish_to: 'none'
-
 version: 1.0.0+1
-
 environment:
   sdk: '>=3.0.0 <4.0.0'
-
 dependencies:
   flutter:
     sdk: flutter
@@ -39,16 +35,14 @@ dependencies:
   google_maps_flutter: ^2.12.2
   geolocator: ^14.0.1
   async: ^2.13.0
-
+  cupertino_icons: ^1.0.8 
 flutter:
   assets:
     - assets/icons/icon.png
     - assets/icons/
   uses-material-design: true
-  
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
-
   flutter_launcher_icons: ^0.14.3
