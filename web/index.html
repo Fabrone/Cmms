@@ -18,8 +18,8 @@
 </head>
 <body>
   <!-- Firebase SDKs -->
-  <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js"></script>
   <script>
     // Initialize Firebase
     const firebaseConfig = {
@@ -33,12 +33,32 @@
     };
     firebase.initializeApp(firebaseConfig);
 
-    // Request notification permission
+    // Initialize Firebase Messaging and register service worker
     const messaging = firebase.messaging();
+    navigator.serviceWorker.register('/firebase-messaging-sw.js')
+      .then((registration) => {
+        console.log('Service Worker registered with scope:', registration.scope);
+        messaging.useServiceWorker(registration);
+      })
+      .catch((error) => {
+        console.error('Service Worker registration failed:', error);
+      });
+
+    // Request notification permission
     Notification.requestPermission().then((permission) => {
       if (permission === 'granted') {
         console.log('Notification permission granted.');
+        // Get FCM token for debugging
+        messaging.getToken().then((token) => {
+          console.log('FCM Token:', token);
+        }).catch((error) => {
+          console.error('Error getting FCM token:', error);
+        });
+      } else {
+        console.warn('Notification permission denied.');
       }
+    }).catch((error) => {
+      console.error('Error requesting notification permission:', error);
     });
   </script>
   <script src="flutter_bootstrap.js" async></script>
