@@ -62,55 +62,92 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
     super.initState();
     _currentRole = widget.currentRole ?? 'User';
     _organization = widget.organization ?? '-';
-    _getCurrentUserRole();
+    _logger.i('Initializing ResponsiveScreenWrapper for ${widget.title}, facilityId: ${widget.facilityId}, role: $_currentRole, org: $_organization');
+    _fetchUserRoleWithRetry();
+    // Force rebuild after 2 seconds to catch late query results
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        setState(() {});
+        _logger.d('Forced UI rebuild for ${widget.title} after 2s');
+      }
+    });
   }
 
-  Future<void> _getCurrentUserRole() async {
+  Future<void> _fetchUserRoleWithRetry({int retries = 3, int delayMs = 500}) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    try {
-      final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
-      final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
-      final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
-      final userDoc = await FirebaseFirestore.instance.collection('Users').doc(user.uid).get();
-
-      String newRole = 'User';
-      String newOrg = '-';
-      bool isDev = false;
-
-      if (adminDoc.exists) {
-        newRole = 'Admin';
-        final adminData = adminDoc.data();
-        newOrg = adminData?['organization'] ?? '-';
-      } else if (developerDoc.exists) {
-        newRole = 'Technician';
-        newOrg = 'JV Almacis';
-        isDev = true;
-      } else if (technicianDoc.exists) {
-        newRole = 'Technician';
-        final techData = technicianDoc.data();
-        newOrg = techData?['organization'] ?? '-';
-      } else if (userDoc.exists) {
-        final userData = userDoc.data();
-        if (userData != null && userData['role'] == 'Technician') {
-          newRole = 'Technician';
-          newOrg = '-';
-        } else {
-          newRole = 'User';
-          newOrg = '-';
-        }
-      }
-
+    if (user == null) {
+      _logger.w('No user logged in, skipping role fetch for ${widget.title}');
       if (mounted) {
         setState(() {
-          _currentRole = newRole;
-          _organization = newOrg;
-          _isDeveloper = isDev;
         });
       }
-    } catch (e) {
-      _logger.e('Error getting user role: $e');
+      return;
+    }
+
+    _logger.i('Fetching role for user: ${user.uid} on ${widget.title}, facilityId: ${widget.facilityId}, retries left: $retries');
+    for (int attempt = 1; attempt <= retries; attempt++) {
+      try {
+        final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
+        final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
+        final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
+        final userDoc = await FirebaseFirestore.instance.collection('Users').doc(user.uid).get();
+
+        _logger.d('Firestore results for ${widget.title}: Admin=${adminDoc.exists}, Developer=${developerDoc.exists}, Technician=${technicianDoc.exists}, User=${userDoc.exists}');
+
+        String newRole = 'User';
+        String newOrg = '-';
+        bool isDev = false;
+
+        if (adminDoc.exists) {
+          newRole = 'Admin';
+          final adminData = adminDoc.data();
+          newOrg = adminData?['organization'] ?? '-';
+          _logger.i('User is Admin, org: $newOrg');
+        } else if (developerDoc.exists) {
+          newRole = 'Technician';
+          newOrg = 'JV Almacis';
+          isDev = true;
+          _logger.i('User is Developer, org: $newOrg');
+        } else if (technicianDoc.exists) {
+          newRole = 'Technician';
+          final techData = technicianDoc.data();
+          newOrg = techData?['organization'] ?? '-';
+          _logger.i('User is Technician, org: $newOrg');
+        } else if (userDoc.exists) {
+          final userData = userDoc.data();
+          if (userData != null && userData['role'] == 'Technician') {
+            newRole = 'Technician';
+            newOrg = '-';
+            _logger.i('User is Technician (via Users collection)');
+          } else {
+            newRole = 'User';
+            newOrg = '-';
+            _logger.i('User is standard User');
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _currentRole = newRole;
+            _organization = newOrg;
+            _isDeveloper = isDev;
+            _logger.i('Updated state for ${widget.title}: role=$newRole, org=$newOrg, isDeveloper=$isDev');
+          });
+        }
+        return; // Success, exit retry loop
+      } catch (e, stackTrace) {
+        _logger.e('Error getting user role on attempt $attempt for ${widget.title}: $e', stackTrace: stackTrace);
+        if (attempt < retries) {
+          await Future.delayed(Duration(milliseconds: delayMs));
+          delayMs *= 2; // Exponential backoff
+        } else {
+          if (mounted) {
+            setState(() {
+            });
+          }
+          _logger.e('Failed to fetch user role after $retries attempts for ${widget.title}');
+        }
+      }
     }
   }
 
@@ -155,6 +192,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   }
 
   Widget _buildDrawer() {
+    _logger.d('Building drawer for ${widget.title}, isDeveloper: $_isDeveloper');
     return Drawer(
       child: Column(
         children: [
@@ -166,6 +204,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   }
 
   Widget _buildSidebar() {
+    _logger.d('Building sidebar for ${widget.title}, isDeveloper: $_isDeveloper');
     return Container(
       width: 250,
       color: Colors.blueGrey[50],
@@ -183,17 +222,19 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   }
 
   Widget _buildAppIcon() {
+    _logger.d('Building app icon for ${widget.title}, isDeveloper: $_isDeveloper');
     return InkWell(
       onTap: _isDeveloper
           ? () {
+              _logger.i('App icon clicked on ${widget.title}, navigating to DeveloperScreen');
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const DeveloperScreen()),
               );
               if (MediaQuery.of(context).size.width <= 600) {
-                Navigator.pop(context);
+                Navigator.pop(context); // Close drawer on mobile
+                _logger.i('Closed drawer after navigation on ${widget.title}');
               }
-              _logger.i('Developer navigated to DeveloperScreen');
             }
           : null,
       child: Container(
@@ -296,21 +337,23 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
     final isMobile = screenWidth <= 600;
     if (isMobile) {
       Navigator.pop(context); // Close drawer
+      _logger.i('Closed drawer for navigation to $title');
     }
 
     if (title == 'Facilities') {
-      // Navigate to DashboardScreen for facility selection
+      widget.onFacilityReset?.call();
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(
           builder: (context) => const DashboardScreen(facilityId: '', role: 'User'),
         ),
-        (route) => false, // Clear stack to prevent back navigation issues
+        (route) => false,
       );
-      _logger.i('Navigated to DashboardScreen for facility selection');
+      _logger.i('Navigated to DashboardScreen for facility selection, facilityId: ""');
       return;
     }
 
+    // Validate facilityId before navigation
     if (widget.facilityId.isEmpty && !['Settings'].contains(title)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -320,6 +363,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           ),
         ),
       );
+      _logger.w('Navigation blocked: No facility selected for $title, facilityId: ${widget.facilityId}');
       return;
     }
 
@@ -350,7 +394,9 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         context,
         MaterialPageRoute(builder: (context) => screenBuilder()),
       );
-      _logger.i('Navigated to $title screen');
+      _logger.i('Navigated to $title screen, facilityId: ${widget.facilityId}');
+      // Re-fetch role after navigation to ensure fresh state
+      _fetchUserRoleWithRetry(retries: 1);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

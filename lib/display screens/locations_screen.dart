@@ -9,7 +9,7 @@ import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 
 class LocationsScreen extends StatefulWidget {
   final String facilityId;
-  
+
   const LocationsScreen({super.key, required this.facilityId});
 
   @override
@@ -18,18 +18,15 @@ class LocationsScreen extends StatefulWidget {
 
 class _LocationsScreenState extends State<LocationsScreen> {
   final Logger _logger = Logger(printer: PrettyPrinter());
-  
+
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
 
-  String _currentRole = 'User';
-  String _organization = '-';
-
   @override
   void initState() {
     super.initState();
-    _getCurrentUserRole();
+    _logger.i('Initializing LocationsScreen, facilityId: ${widget.facilityId}, user: ${FirebaseAuth.instance.currentUser?.uid}');
   }
 
   @override
@@ -38,57 +35,10 @@ class _LocationsScreenState extends State<LocationsScreen> {
     _locationController.dispose();
     _addressController.dispose();
     super.dispose();
+    _logger.i('Disposed LocationsScreen');
   }
 
-  Future<void> _getCurrentUserRole() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    try {
-      final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
-      final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
-      final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
-      final userDoc = await FirebaseFirestore.instance.collection('Users').doc(user.uid).get();
-      
-      String newRole = 'User';
-      String newOrg = '-';
-      
-      if (adminDoc.exists) {
-        newRole = 'Admin';
-        final adminData = adminDoc.data();
-        newOrg = adminData?['organization'] ?? '-';
-      } 
-      else if (developerDoc.exists) {
-        newRole = 'Technician';
-        newOrg = 'JV Almacis';
-      }
-      else if (technicianDoc.exists) {
-        newRole = 'Technician';
-        final techData = technicianDoc.data();
-        newOrg = techData?['organization'] ?? '-';
-      }
-      else if (userDoc.exists) {
-        final userData = userDoc.data();
-        if (userData != null && userData['role'] == 'Technician') {
-          newRole = 'Technician';
-          newOrg = '-';
-        } else {
-          newRole = 'User';
-          newOrg = '-';
-        }
-      }
-      
-      if (mounted) {
-        setState(() {
-          _currentRole = newRole;
-          _organization = newOrg;
-        });
-      }
-    } catch (e) {
-      _logger.e('Error getting user role: $e');
-    }
-  }
-
+  /// Adds a new facility to Firestore.
   Future<void> _addFacility() async {
     if (_nameController.text.trim().isEmpty || _locationController.text.trim().isEmpty) {
       _showSnackBar('Please fill in all required fields');
@@ -99,6 +49,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
         _showSnackBar('User not authenticated');
+        _logger.w('User not authenticated for adding facility');
         return;
       }
 
@@ -116,22 +67,25 @@ class _LocationsScreenState extends State<LocationsScreen> {
           .add(facility.toFirestore());
 
       if (!mounted) return;
-      
+
       _showSnackBar('Facility added successfully');
+      _logger.i('Facility added: ${facility.name}, facilityId: ${widget.facilityId}');
       _clearForm();
       Navigator.pop(context);
-    } catch (e) {
-      _logger.e('Error adding facility: $e');
+    } catch (e, stackTrace) {
+      _logger.e('Error adding facility: $e', stackTrace: stackTrace);
       _showSnackBar('Error adding facility: $e');
     }
   }
 
+  /// Clears the form fields.
   void _clearForm() {
     _nameController.clear();
     _locationController.clear();
     _addressController.clear();
   }
 
+  /// Shows a snackbar with the given message.
   void _showSnackBar(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -140,6 +94,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
     }
   }
 
+  /// Displays a dialog for adding a new facility.
   void _showAddFacilityDialog() {
     showDialog(
       context: context,
@@ -210,6 +165,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
     );
   }
 
+  /// Shows a dialog with facility details.
   void _showFacilityDetails(Facility facility) {
     showDialog(
       context: context,
@@ -232,9 +188,9 @@ class _LocationsScreenState extends State<LocationsScreen> {
             ],
             const SizedBox(height: 12),
             _buildDetailRow(
-              Icons.calendar_today, 
-              'Created', 
-              '${facility.createdAt.day}/${facility.createdAt.month}/${facility.createdAt.year}'
+              Icons.calendar_today,
+              'Created',
+              '${facility.createdAt.day}/${facility.createdAt.month}/${facility.createdAt.year}',
             ),
           ],
         ),
@@ -260,6 +216,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
     );
   }
 
+  /// Builds a row for displaying facility details.
   Widget _buildDetailRow(IconData icon, String label, String value) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -292,6 +249,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
     );
   }
 
+  /// Opens Google Maps screen for the given facility.
   void _openGoogleMaps(String facilityName, String location) async {
     final result = await Navigator.push(
       context,
@@ -305,16 +263,16 @@ class _LocationsScreenState extends State<LocationsScreen> {
 
     if (result != null && mounted) {
       _showSnackBar('Map configuration updated for $facilityName');
+      _logger.i('Map updated for $facilityName');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    _logger.d('Building LocationsScreen, facilityId: ${widget.facilityId}');
     return ResponsiveScreenWrapper(
       title: 'Locations',
       facilityId: widget.facilityId,
-      currentRole: _currentRole,
-      organization: _organization,
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddFacilityDialog,
         backgroundColor: Colors.blueGrey,
@@ -324,6 +282,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
     );
   }
 
+  /// Builds the main content of the screen.
   Widget _buildBody() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -345,6 +304,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
     );
   }
 
+  /// Builds the list of facilities using StreamBuilder.
   Widget _buildFacilitiesList() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -357,6 +317,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
         }
 
         if (snapshot.hasError) {
+          _logger.e('Error loading facilities: ${snapshot.error}');
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -427,6 +388,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
     );
   }
 
+  /// Builds a tile for a single facility.
   Widget _buildFacilityTile(Facility facility) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
