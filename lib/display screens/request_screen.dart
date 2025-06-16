@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
@@ -25,23 +25,24 @@ class _RequestScreenState extends State<RequestScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _commentController = TextEditingController();
+  final _notesController = TextEditingController();
   final Logger _logger = Logger(printer: PrettyPrinter());
-  String _selectedStatus = 'All';
   String _priority = 'Medium';
+  String _statusFilter = 'All';
   final List<Map<String, String>> _attachmentUrls = [];
   bool _showForm = false;
   String _currentRole = 'User';
   String _organization = '-';
+  String? _createdByEmail;
 
   @override
   void initState() {
     super.initState();
-    _getCurrentUserRole();
+    _getCurrentUserInfo();
     _logger.i('RequestScreen initialized: facilityId=${widget.facilityId}');
   }
 
-  Future<void> _getCurrentUserRole() async {
+  Future<void> _getCurrentUserInfo() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -53,6 +54,7 @@ class _RequestScreenState extends State<RequestScreen> {
 
       String newRole = 'User';
       String newOrg = '-';
+      String? email = user.email;
 
       if (adminDoc.exists) {
         newRole = 'Admin';
@@ -78,70 +80,71 @@ class _RequestScreenState extends State<RequestScreen> {
         setState(() {
           _currentRole = newRole;
           _organization = newOrg;
+          _createdByEmail = email;
         });
       }
     } catch (e) {
-      _logger.e('Error getting user role: $e');
+      _logger.e('Error getting user info: $e');
     }
   }
 
-  Future<void> _submitRequest() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      _logger.e('No user signed in');
-      if (mounted) _showSnackBar('Please sign in to submit requests');
-      return;
-    }
-    try {
-      _logger.i('Submitting request: title=${_titleController.text}, facilityId=${widget.facilityId}');
-      final requestId = const Uuid().v4();
-
-      final request = Request(
-        id: requestId,
-        requestId: requestId,
-        title: _titleController.text.trim(),
-        description: _descriptionController.text.trim(),
-        status: 'Open',
-        priority: _priority,
-        createdAt: DateTime.now(),
-        createdBy: user.uid,
-        createdByEmail: user.email,
-        attachments: _attachmentUrls,
-        comments: _commentController.text.isNotEmpty
-            ? [
-                {
-                  'text': _commentController.text.trim(),
-                  'by': user.email ?? 'Unknown',
-                  'timestamp': Timestamp.now(),
-                }
-              ]
-            : [],
-        workOrderIds: [],
-        clientStatus: 'Pending',
-      );
-
-      await FirebaseFirestore.instance
-          .collection('facilities')
-          .doc(widget.facilityId)
-          .collection('requests')
-          .doc(requestId)
-          .set(request.toMap());
-
-      if (mounted) {
-        _titleController.clear();
-        _descriptionController.clear();
-        _commentController.clear();
-        setState(() {
-          _attachmentUrls.clear();
-          _showForm = false;
-        });
-        _showSnackBar('Request submitted successfully');
+  Future<void> _addRequest() async {
+    if (_formKey.currentState!.validate()) {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        if (mounted) _showSnackBar('Please sign in to add requests');
+        return;
       }
-    } catch (e) {
-      _logger.e('Error submitting request: $e');
-      if (mounted) _showSnackBar('Error submitting request: $e');
+      try {
+        final requestId = const Uuid().v4();
+        _logger.i('Adding request: requestId=$requestId, title=${_titleController.text}');
+
+        final request = Request(
+          id: requestId,
+          requestId: requestId,
+          title: _titleController.text,
+          description: _descriptionController.text,
+          status: 'Open',
+          priority: _priority,
+          createdAt: DateTime.now(),
+          createdBy: user.uid,
+          createdByEmail: _createdByEmail,
+          attachments: List<Map<String, String>>.from(_attachmentUrls),
+          comments: [
+            if (_notesController.text.isNotEmpty)
+              {
+                'action': 'Comment',
+                'timestamp': Timestamp.now(),
+                'comment': _notesController.text,
+                'userId': user.uid,
+                'userEmail': _createdByEmail,
+              }
+          ],
+          workOrderIds: [],
+          clientStatus: 'Pending',
+        );
+
+        await FirebaseFirestore.instance
+            .collection('facilities')
+            .doc(widget.facilityId)
+            .collection('requests')
+            .doc(requestId)
+            .set(request.toMap());
+
+        if (mounted) {
+          setState(() {
+            _attachmentUrls.clear();
+            _showForm = false;
+          });
+          _titleController.clear();
+          _descriptionController.clear();
+          _notesController.clear();
+          _showSnackBar('Request submitted');
+        }
+      } catch (e) {
+        _logger.e('Error adding request: $e');
+        if (mounted) _showSnackBar('Error: $e');
+      }
     }
   }
 
@@ -197,38 +200,36 @@ class _RequestScreenState extends State<RequestScreen> {
     }
   }
 
-  Future<void> _updateRequest(String docId, String newStatus, String comment) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      _logger.e('No user signed in');
-      if (mounted) _showSnackBar('Please sign in to update requests');
-      return;
-    }
+  Future<void> _updateStatus(String docId, String newStatus, String comment) async {
     try {
-      _logger.i('Updating request: docId=$docId, newStatus=$newStatus, facilityId=${widget.facilityId}');
-      final updates = {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      _logger.i('Updating status: docId=$docId, newStatus=$newStatus');
+      final updateData = {
         'status': newStatus,
-        'updatedAt': Timestamp.now(),
       };
       if (comment.isNotEmpty) {
-        updates['comments'] = FieldValue.arrayUnion([
+        updateData['comments'] = FieldValue.arrayUnion([
           {
-            'text': comment.trim(),
-            'by': user.email ?? 'Unknown',
+            'action': 'Status changed to $newStatus',
             'timestamp': Timestamp.now(),
+            'comment': comment,
+            'userId': user.uid,
+            'userEmail': _createdByEmail,
           }
-        ]);
+        ]) as String;
       }
       await FirebaseFirestore.instance
           .collection('facilities')
           .doc(widget.facilityId)
           .collection('requests')
           .doc(docId)
-          .update(updates);
-      if (mounted) _showSnackBar('Request status updated to $newStatus');
+          .update(updateData);
+      if (mounted) _showSnackBar('Status updated to $newStatus');
     } catch (e) {
-      _logger.e('Error updating request: $e');
-      if (mounted) _showSnackBar('Error updating request: $e');
+      _logger.e('Error updating status: $e');
+      if (mounted) _showSnackBar('Error updating status: $e');
     }
   }
 
@@ -244,14 +245,14 @@ class _RequestScreenState extends State<RequestScreen> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _commentController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return ResponsiveScreenWrapper(
-      title: 'Work on Request',
+      title: 'Requests',
       facilityId: widget.facilityId,
       currentRole: _currentRole,
       organization: _organization,
@@ -276,55 +277,62 @@ class _RequestScreenState extends State<RequestScreen> {
     final fontSizeTitle = isMobile ? 20.0 : screenWidth <= 900 ? 24.0 : 28.0;
     final fontSizeSubtitle = isMobile ? 14.0 : screenWidth <= 900 ? 16.0 : 18.0;
 
-    return Column(
-      children: [
-        Container(
-          padding: EdgeInsets.all(padding),
-          color: Colors.grey[100],
-          child: Row(
-            children: [
-              Text(
-                'Filter by Status:',
-                style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.w500,
-                  color: Colors.blueGrey[800],
-                  fontSize: fontSizeSubtitle,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _selectedStatus,
-                  items: ['All', 'Open', 'In Progress', 'Closed']
-                      .map((s) => DropdownMenuItem(
-                            value: s,
-                            child: Text(s, style: GoogleFonts.poppins(color: Colors.blueGrey[900])),
-                          ))
-                      .toList(),
-                  onChanged: (value) => setState(() => _selectedStatus = value!),
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: Colors.grey[400]!),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    filled: true,
-                    fillColor: Colors.white,
-                    labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(padding),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: EdgeInsets.all(padding),
+            color: Colors.grey[100],
+            child: Row(
+              children: [
+                Text(
+                  'Filter by Status:',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w500,
+                    color: Colors.blueGrey[800],
+                    fontSize: fontSizeSubtitle,
                   ),
-                  style: GoogleFonts.poppins(color: Colors.blueGrey[900]),
                 ),
-              ),
-            ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _statusFilter,
+                    items: ['All', 'Open', 'In Progress', 'Closed']
+                        .map((s) => DropdownMenuItem(
+                              value: s,
+                              child: Text(s, style: GoogleFonts.poppins(color: Colors.blueGrey[900])),
+                            ))
+                        .toList(),
+                    onChanged: (value) => setState(() => _statusFilter = value!),
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: Colors.grey[400]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      filled: true,
+                      fillColor: Colors.white,
+                      labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
+                    ),
+                    style: GoogleFonts.poppins(color: Colors.blueGrey[900]),
+                    dropdownColor: Colors.white,
+                    icon: Icon(Icons.arrow_drop_down, color: Colors.blueGrey[800]),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        Expanded(
-          child: StreamBuilder<QuerySnapshot>(
-            stream: _selectedStatus == 'All'
+          const SizedBox(height: 24),
+          if (_showForm) _buildRequestForm(padding, fontSizeTitle, fontSizeSubtitle),
+          const SizedBox(height: 24),
+          StreamBuilder<QuerySnapshot>(
+            stream: _statusFilter == 'All'
                 ? FirebaseFirestore.instance
                     .collection('facilities')
                     .doc(widget.facilityId)
@@ -335,7 +343,7 @@ class _RequestScreenState extends State<RequestScreen> {
                     .collection('facilities')
                     .doc(widget.facilityId)
                     .collection('requests')
-                    .where('status', isEqualTo: _selectedStatus)
+                    .where('status', isEqualTo: _statusFilter)
                     .orderBy('createdAt', descending: true)
                     .snapshots(),
             builder: (context, snapshot) {
@@ -375,6 +383,8 @@ class _RequestScreenState extends State<RequestScreen> {
                 );
               }
               return ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
                 padding: EdgeInsets.all(padding),
                 itemCount: docs.length,
                 itemBuilder: (context, index) {
@@ -420,7 +430,7 @@ class _RequestScreenState extends State<RequestScreen> {
                             ),
                           ),
                           Text(
-                            'Created: ${request.createdAt != null ? DateFormat.yMMMd().format(request.createdAt!) : 'Unknown date'}',
+                            'Created By: ${request.createdByEmail ?? request.createdBy}',
                             style: GoogleFonts.poppins(
                               fontSize: isMobile ? 12 : 14,
                               color: Colors.grey[600],
@@ -428,7 +438,7 @@ class _RequestScreenState extends State<RequestScreen> {
                           ),
                           const SizedBox(height: 12),
                           _buildDetailRow('Description', request.description, fontSizeSubtitle),
-                          _buildDetailRow('Created By', request.createdByEmail ?? 'Unknown', fontSizeSubtitle),
+                          _buildDetailRow('Created', request.createdAt != null ? DateFormat.yMMMd().format(request.createdAt!) : 'Unknown date', fontSizeSubtitle),
                           if (request.attachments.isNotEmpty)
                             _buildAttachmentsSection(request.attachments, fontSizeSubtitle),
                           if (request.comments.isNotEmpty)
@@ -445,9 +455,9 @@ class _RequestScreenState extends State<RequestScreen> {
               );
             },
           ),
-        ),
-        if (_showForm) _buildRequestForm(padding, fontSizeTitle, fontSizeSubtitle),
-      ],
+          const SizedBox(height: 80), // Padding to avoid overlap with FAB
+        ],
+      ),
     );
   }
 
@@ -499,7 +509,7 @@ class _RequestScreenState extends State<RequestScreen> {
             children: attachments
                 .map((attachment) => Chip(
                       label: Text(
-                        attachment['name'] ?? 'Unknown',
+                        attachment['name'] ?? attachment['url']!.split('/').last,
                         style: GoogleFonts.poppins(fontSize: fontSize - 2),
                       ),
                       backgroundColor: Colors.blue[50],
@@ -526,7 +536,7 @@ class _RequestScreenState extends State<RequestScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          ...comments.map((comment) => Container(
+          ...comments.map((entry) => Container(
                 margin: const EdgeInsets.only(bottom: 4),
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
@@ -537,16 +547,21 @@ class _RequestScreenState extends State<RequestScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      comment['text'] ?? '',
-                      style: GoogleFonts.poppins(fontSize: fontSize - 2),
+                      entry['action'] ?? 'Comment',
+                      style: GoogleFonts.poppins(fontSize: fontSize - 2, fontWeight: FontWeight.w500),
                     ),
                     Text(
-                      'by ${comment['by'] ?? 'Unknown'} at ${comment['timestamp'] != null ? DateFormat.yMMMd().format((comment['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
+                      'by ${entry['userEmail'] ?? entry['userId'] ?? 'Unknown'} at ${entry['timestamp'] != null ? DateFormat.yMMMd().format((entry['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
                       style: GoogleFonts.poppins(
                         fontSize: fontSize - 4,
                         color: Colors.grey[600],
                       ),
                     ),
+                    if (entry['comment'] != null && entry['comment'].isNotEmpty)
+                      Text(
+                        entry['comment'],
+                        style: GoogleFonts.poppins(fontSize: fontSize - 3),
+                      ),
                   ],
                 ),
               )),
@@ -562,7 +577,7 @@ class _RequestScreenState extends State<RequestScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Work Orders:',
+            'Related Work Orders:',
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w500,
               color: Colors.blueGrey[700],
@@ -570,30 +585,18 @@ class _RequestScreenState extends State<RequestScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          ...workOrderIds.map((workOrderId) => StreamBuilder<DocumentSnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('facilities')
-                    .doc(widget.facilityId)
-                    .collection('work_orders')
-                    .doc(workOrderId)
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) return const SizedBox.shrink();
-                  final workOrder = snapshot.data!;
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 4),
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.green[50],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '${workOrder['title'] ?? 'Untitled'} - Status: ${workOrder['clientStatus'] ?? 'Unknown'}',
-                      style: GoogleFonts.poppins(fontSize: fontSize - 2),
-                    ),
-                  );
-                },
-              )),
+          Wrap(
+            spacing: 8,
+            children: workOrderIds
+                .map((id) => Chip(
+                      label: Text(
+                        'WO-$id',
+                        style: GoogleFonts.poppins(fontSize: fontSize - 2),
+                      ),
+                      backgroundColor: Colors.blue[50],
+                    ))
+                .toList(),
+          ),
         ],
       ),
     );
@@ -681,7 +684,7 @@ class _RequestScreenState extends State<RequestScreen> {
           ),
           ElevatedButton(
             onPressed: () {
-              _updateRequest(request.id, selectedStatus, commentController.text);
+              _updateStatus(request.id, selectedStatus, commentController.text);
               Navigator.pop(context);
             },
             style: ElevatedButton.styleFrom(
@@ -713,7 +716,7 @@ class _RequestScreenState extends State<RequestScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Submit New Request',
+                    'Create Request',
                     style: GoogleFonts.poppins(
                       fontSize: fontSizeTitle,
                       fontWeight: FontWeight.bold,
@@ -732,11 +735,11 @@ class _RequestScreenState extends State<RequestScreen> {
                       children: [
                         _buildTextField(_titleController, 'Title', fontSizeSubtitle, validator: (value) => value!.isEmpty ? 'Enter a title' : null),
                         const SizedBox(height: 16),
-                        _buildTextField(_descriptionController, 'Description', fontSizeSubtitle, maxLines: 3, validator: (value) => value!.isEmpty ? 'Enter a description' : null),
+                        _buildTextField(_descriptionController, 'Description', fontSizeSubtitle, maxLines: 3),
                         const SizedBox(height: 16),
                         _buildDropdown('Priority', _priority, ['Low', 'Medium', 'High'], (value) => setState(() => _priority = value!), fontSizeSubtitle),
                         const SizedBox(height: 16),
-                        _buildTextField(_commentController, 'Comment (optional)', fontSizeSubtitle, maxLines: 2),
+                        _buildTextField(_notesController, 'Comment', fontSizeSubtitle, maxLines: 2),
                       ],
                     )
                   : Column(
@@ -745,7 +748,7 @@ class _RequestScreenState extends State<RequestScreen> {
                           children: [
                             Expanded(child: _buildTextField(_titleController, 'Title', fontSizeSubtitle, validator: (value) => value!.isEmpty ? 'Enter a title' : null)),
                             const SizedBox(width: 16),
-                            Expanded(child: _buildTextField(_descriptionController, 'Description', fontSizeSubtitle, maxLines: 3, validator: (value) => value!.isEmpty ? 'Enter a description' : null)),
+                            Expanded(child: _buildTextField(_descriptionController, 'Description', fontSizeSubtitle, maxLines: 3)),
                           ],
                         ),
                         const SizedBox(height: 16),
@@ -753,7 +756,7 @@ class _RequestScreenState extends State<RequestScreen> {
                           children: [
                             Expanded(child: _buildDropdown('Priority', _priority, ['Low', 'Medium', 'High'], (value) => setState(() => _priority = value!), fontSizeSubtitle)),
                             const SizedBox(width: 16),
-                            Expanded(child: _buildTextField(_commentController, 'Comment (optional)', fontSizeSubtitle, maxLines: 2)),
+                            Expanded(child: _buildTextField(_notesController, 'Comment', fontSizeSubtitle, maxLines: 2)),
                           ],
                         ),
                       ],
@@ -800,7 +803,7 @@ class _RequestScreenState extends State<RequestScreen> {
                   const SizedBox(width: 16),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: _submitRequest,
+                      onPressed: _addRequest,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blueGrey[800],
                         padding: const EdgeInsets.symmetric(vertical: 16),
@@ -888,6 +891,8 @@ class _RequestScreenState extends State<RequestScreen> {
         labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
       ),
       style: GoogleFonts.poppins(color: Colors.blueGrey[900], fontSize: fontSize),
+      dropdownColor: Colors.white,
+      icon: Icon(Icons.arrow_drop_down, color: Colors.blueGrey[800]),
     );
   }
 
