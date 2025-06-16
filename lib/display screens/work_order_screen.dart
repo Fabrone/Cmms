@@ -295,56 +295,61 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> {
     final fontSizeTitle = isMobile ? 20.0 : screenWidth <= 900 ? 24.0 : 28.0;
     final fontSizeSubtitle = isMobile ? 14.0 : screenWidth <= 900 ? 16.0 : 18.0;
 
-    return Column(
-      children: [
-        Container(
-          padding: EdgeInsets.all(padding),
-          color: Colors.grey[100],
-          child: Row(
-            children: [
-              Text(
-                'Filter by Status:',
-                style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.w500,
-                  color: Colors.blueGrey[800],
-                  fontSize: fontSizeSubtitle,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _statusFilter,
-                  items: ['All', 'Open', 'In Progress', 'Closed']
-                      .map((s) => DropdownMenuItem(
-                            value: s,
-                            child: Text(s, style: GoogleFonts.poppins(color: Colors.blueGrey[900])),
-                          ))
-                      .toList(),
-                  onChanged: (value) => setState(() => _statusFilter = value!),
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: Colors.grey[400]!),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    filled: true,
-                    fillColor: Colors.white,
-                    labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(padding),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: EdgeInsets.all(padding),
+            color: Colors.grey[100],
+            child: Row(
+              children: [
+                Text(
+                  'Filter by Status:',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w500,
+                    color: Colors.blueGrey[800],
+                    fontSize: fontSizeSubtitle,
                   ),
-                  style: GoogleFonts.poppins(color: Colors.blueGrey[900]),
-                  dropdownColor: Colors.white,
-                  icon: Icon(Icons.arrow_drop_down, color: Colors.blueGrey[800]),
                 ),
-              ),
-            ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _statusFilter,
+                    items: ['All', 'Open', 'In Progress', 'Closed']
+                        .map((s) => DropdownMenuItem(
+                              value: s,
+                              child: Text(s, style: GoogleFonts.poppins(color: Colors.blueGrey[900])),
+                            ))
+                        .toList(),
+                    onChanged: (value) => setState(() => _statusFilter = value!),
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: Colors.grey[400]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      filled: true,
+                      fillColor: Colors.white,
+                      labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
+                    ),
+                    style: GoogleFonts.poppins(color: Colors.blueGrey[900]),
+                    dropdownColor: Colors.white,
+                    icon: Icon(Icons.arrow_drop_down, color: Colors.blueGrey[800]),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        Expanded(
-          child: StreamBuilder<QuerySnapshot>(
+          const SizedBox(height: 24),
+          if (_showForm) _buildWorkOrderForm(padding, fontSizeTitle, fontSizeSubtitle),
+          const SizedBox(height: 24),
+          StreamBuilder<QuerySnapshot>(
             stream: _statusFilter == 'All'
                 ? FirebaseFirestore.instance
                     .collection('facilities')
@@ -396,6 +401,8 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> {
                 );
               }
               return ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
                 padding: EdgeInsets.all(padding),
                 itemCount: docs.length,
                 itemBuilder: (context, index) {
@@ -466,9 +473,9 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> {
               );
             },
           ),
-        ),
-        if (_showForm) _buildWorkOrderForm(padding, fontSizeTitle, fontSizeSubtitle),
-      ],
+          const SizedBox(height: 80), // Padding to avoid overlap with FAB
+        ],
+      ),
     );
   }
 
