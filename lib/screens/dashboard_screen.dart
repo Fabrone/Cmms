@@ -25,9 +25,8 @@ class DashboardScreenState extends State<DashboardScreen> {
   final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String _currentRole = 'User';
-  bool _isDeveloper = false;
-  String? _selectedFacilityId;
   String _organization = '-';
+  String? _selectedFacilityId;
   bool _isFacilitySelectionActive = true;
   List<StreamSubscription<DocumentSnapshot>> _roleSubscriptions = [];
 
@@ -95,7 +94,6 @@ class DashboardScreenState extends State<DashboardScreen> {
 
       String newRole = 'User';
       String newOrg = '-';
-      bool isDev = false;
 
       logger.i('Role documents: Admin=${adminDoc.exists}, Developer=${developerDoc.exists}, Technician=${technicianDoc.exists}, User=${userDoc.exists}');
 
@@ -106,7 +104,6 @@ class DashboardScreenState extends State<DashboardScreen> {
       } else if (developerDoc.exists) {
         newRole = 'Technician';
         newOrg = 'JV Almacis';
-        isDev = true;
       } else if (technicianDoc.exists) {
         newRole = 'Technician';
         final techData = technicianDoc.data();
@@ -126,7 +123,6 @@ class DashboardScreenState extends State<DashboardScreen> {
         setState(() {
           _currentRole = newRole;
           _organization = newOrg;
-          _isDeveloper = isDev;
         });
         _messengerKey.currentState?.showSnackBar(
           SnackBar(
@@ -145,7 +141,6 @@ class DashboardScreenState extends State<DashboardScreen> {
         setState(() {
           _currentRole = 'User';
           _organization = '-';
-          _isDeveloper = false;
         });
       }
     }
@@ -239,7 +234,6 @@ class DashboardScreenState extends State<DashboardScreen> {
                 currentRole: _currentRole,
                 organization: _organization,
                 onFacilityReset: _refreshFacilitiesView,
-                isDeveloper: _isDeveloper, // Pass developer flag
                 actions: [
                   if (_currentRole == 'Admin')
                     Padding(

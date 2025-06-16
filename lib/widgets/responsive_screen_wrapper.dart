@@ -30,7 +30,6 @@ class ResponsiveScreenWrapper extends StatefulWidget {
   final String facilityId;
   final String? currentRole;
   final String? organization;
-  final bool isDeveloper;
   final List<Widget>? actions;
   final Widget? floatingActionButton;
   final VoidCallback? onFacilityReset;
@@ -42,7 +41,6 @@ class ResponsiveScreenWrapper extends StatefulWidget {
     required this.facilityId,
     this.currentRole,
     this.organization,
-    this.isDeveloper = false,
     this.actions,
     this.floatingActionButton,
     this.onFacilityReset,
@@ -57,6 +55,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String _currentRole = 'User';
   String _organization = '-';
+  bool _isDeveloper = false;
 
   @override
   void initState() {
@@ -78,6 +77,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
       String newRole = 'User';
       String newOrg = '-';
+      bool isDev = false;
 
       if (adminDoc.exists) {
         newRole = 'Admin';
@@ -86,6 +86,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       } else if (developerDoc.exists) {
         newRole = 'Technician';
         newOrg = 'JV Almacis';
+        isDev = true;
       } else if (technicianDoc.exists) {
         newRole = 'Technician';
         final techData = technicianDoc.data();
@@ -105,6 +106,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         setState(() {
           _currentRole = newRole;
           _organization = newOrg;
+          _isDeveloper = isDev;
         });
       }
     } catch (e) {
@@ -182,7 +184,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
   Widget _buildAppIcon() {
     return InkWell(
-      onTap: widget.isDeveloper
+      onTap: _isDeveloper
           ? () {
               Navigator.push(
                 context,
