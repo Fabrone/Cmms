@@ -139,7 +139,7 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Facility Management System',
+      title: 'NyumbaSmart',
       navigatorKey: navigatorKey,
       theme: ThemeData(
         primarySwatch: Colors.blue,

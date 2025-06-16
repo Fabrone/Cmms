@@ -1,3 +1,4 @@
+import 'package:cmms/screens/dashboard_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -21,7 +22,7 @@ import 'package:cmms/display%20screens/kpi_screen.dart';
 import 'package:cmms/display%20screens/report_screen.dart';
 import 'package:cmms/screens/settings_screen.dart';
 import 'package:cmms/screens/user_screen.dart';
-import 'package:cmms/developer/developer_screen.dart'; // Added for developers
+import 'package:cmms/developer/developer_screen.dart';
 
 class ResponsiveScreenWrapper extends StatefulWidget {
   final String title;
@@ -29,7 +30,7 @@ class ResponsiveScreenWrapper extends StatefulWidget {
   final String facilityId;
   final String? currentRole;
   final String? organization;
-  final bool isDeveloper; // Added for developer-specific features
+  final bool isDeveloper;
   final List<Widget>? actions;
   final Widget? floatingActionButton;
   final VoidCallback? onFacilityReset;
@@ -188,7 +189,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
                 MaterialPageRoute(builder: (context) => const DeveloperScreen()),
               );
               if (MediaQuery.of(context).size.width <= 600) {
-                Navigator.pop(context); // Close drawer on mobile
+                Navigator.pop(context);
               }
               _logger.i('Developer navigated to DeveloperScreen');
             }
@@ -292,14 +293,20 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth <= 600;
     if (isMobile) {
-      Navigator.pop(context);
+      Navigator.pop(context); // Close drawer
     }
 
     if (title == 'Facilities') {
-      if (widget.onFacilityReset != null) {
-        widget.onFacilityReset!();
-        return;
-      }
+      // Navigate to DashboardScreen for facility selection
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const DashboardScreen(facilityId: '', role: 'User'),
+        ),
+        (route) => false, // Clear stack to prevent back navigation issues
+      );
+      _logger.i('Navigated to DashboardScreen for facility selection');
+      return;
     }
 
     if (widget.facilityId.isEmpty && !['Settings'].contains(title)) {
@@ -341,12 +348,14 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         context,
         MaterialPageRoute(builder: (context) => screenBuilder()),
       );
+      _logger.i('Navigated to $title screen');
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('$title feature not found', style: GoogleFonts.poppins()),
         ),
       );
+      _logger.w('Navigation failed: $title feature not found');
     }
   }
 }

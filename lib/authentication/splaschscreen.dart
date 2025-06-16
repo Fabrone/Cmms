@@ -278,7 +278,7 @@ class SplashScreenState extends State<SplashScreen> with TickerProviderStateMixi
                     child: const Column(
                       children: [
                         Text(
-                          'CMMS',
+                          'NyumbaSmart',
                           style: TextStyle(
                             fontSize: 32,
                             fontWeight: FontWeight.bold,
