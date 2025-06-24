@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -107,6 +108,8 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
   }
 
   Future<void> _showUploadDialog() async {
+    if (!mounted) return;
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -147,12 +150,14 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'dwg', 'dxf'],
+        withData: kIsWeb,
       );
       if (result == null || result.files.isEmpty) return;
 
-      final file = File(result.files.single.path!);
-      final fileName = result.files.single.name;
+      final platformFile = result.files.single;
+      final fileName = platformFile.name;
       final user = FirebaseAuth.instance.currentUser;
+      
       if (user == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -163,6 +168,7 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
       }
 
       final title = _titleController.text.trim().isEmpty ? fileName : _titleController.text.trim();
+      
       if (!mounted) {
         logger.w('Widget not mounted, skipping confirmation dialog for $fileName');
         return;
@@ -172,9 +178,31 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
         context: context,
         builder: (context) => AlertDialog(
           title: Text('Confirm Upload', style: GoogleFonts.poppins()),
-          content: Text(
-            'Do you want to upload the file: $fileName?',
-            style: GoogleFonts.poppins(),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (kIsWeb) 
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'WEB',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[800],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Text(
+                'Do you want to upload the file: $fileName?',
+                style: GoogleFonts.poppins(),
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -223,6 +251,16 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
                           : 'Starting upload...',
                       style: GoogleFonts.poppins(),
                     ),
+                    if (kIsWeb) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Web Upload',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: Colors.blue[600],
+                        ),
+                      ),
+                    ],
                   ],
                 );
               },
@@ -234,12 +272,48 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
       final storageRef = FirebaseStorage.instance
           .ref()
           .child('facilities/${widget.facilityId}/drawings/${DateTime.now().millisecondsSinceEpoch}_$fileName');
-      final uploadTask = storageRef.putFile(file);
+
+      late UploadTask uploadTask;
+      
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        if (platformFile.bytes == null) {
+          throw 'File bytes not available for web/desktop upload';
+        }
+        
+        final metadata = SettableMetadata(
+          contentType: _getContentType(fileName),
+          customMetadata: {
+            'uploadedBy': user.uid,
+            'originalName': fileName,
+            'platform': kIsWeb ? 'web' : Platform.operatingSystem,
+          },
+        );
+        
+        uploadTask = storageRef.putData(platformFile.bytes!, metadata);
+      } else {
+        if (platformFile.path == null) {
+          throw 'File path not available for mobile upload';
+        }
+        
+        final file = File(platformFile.path!);
+        final metadata = SettableMetadata(
+          contentType: _getContentType(fileName),
+          customMetadata: {
+            'uploadedBy': user.uid,
+            'originalName': fileName,
+            'platform': Platform.operatingSystem,
+          },
+        );
+        
+        uploadTask = storageRef.putFile(file, metadata);
+      }
 
       uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
-        setState(() {
-          _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
-        });
+        if (mounted) {
+          setState(() {
+            _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
+          });
+        }
       }, onError: (e) {
         logger.e('Upload progress error: $e');
       });
@@ -255,6 +329,7 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
         'uploadedAt': FieldValue.serverTimestamp(),
         'facilityId': widget.facilityId,
         'category': _selectedCategory,
+        'platform': kIsWeb ? 'web' : Platform.operatingSystem,
       });
 
       if (mounted) {
@@ -274,15 +349,56 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
       }
       logger.e('Error uploading drawing: $e');
     } finally {
-      setState(() {
-        _uploadProgress = null;
-      });
+      if (mounted) {
+        setState(() {
+          _uploadProgress = null;
+        });
+      }
+    }
+  }
+
+  String _getContentType(String fileName) {
+    final extension = fileName.toLowerCase().split('.').last;
+    switch (extension) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'dwg':
+        return 'application/acad';
+      case 'dxf':
+        return 'application/dxf';
+      default:
+        return 'application/octet-stream';
     }
   }
 
   Future<void> _viewDocument(String url, String fileName) async {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text('Loading document...', style: GoogleFonts.poppins()),
+          ],
+        ),
+      ),
+    );
+
     try {
-      if (Platform.isAndroid || Platform.isIOS) {
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        if (mounted) Navigator.pop(context);
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw 'Could not open drawing in browser';
+        }
+      } else if (Platform.isAndroid || Platform.isIOS) {
         if (fileName.toLowerCase().endsWith('.pdf')) {
           final tempDir = await getTemporaryDirectory();
           final filePath = '${tempDir.path}/$fileName';
@@ -290,6 +406,7 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
           final file = File(filePath);
           if (await file.exists()) {
             if (mounted) {
+              Navigator.pop(context);
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -301,18 +418,13 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
             throw 'Failed to download PDF';
           }
         } else {
+          if (mounted) Navigator.pop(context);
           throw 'Only PDF viewing is supported on mobile';
-        }
-      } else {
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.inAppWebView);
-        } else {
-          throw 'Could not open drawing';
         }
       }
     } catch (e) {
       if (mounted) {
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error viewing drawing: $e', style: GoogleFonts.poppins())),
         );
@@ -322,11 +434,37 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
   }
 
   Future<void> _downloadDocument(String url, String fileName) async {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text('Downloading...', style: GoogleFonts.poppins()),
+          ],
+        ),
+      ),
+    );
+
     try {
-      if (Platform.isAndroid || Platform.isIOS) {
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        if (mounted) Navigator.pop(context);
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw 'Could not download drawing';
+        }
+      } else if (Platform.isAndroid || Platform.isIOS) {
         bool permissionGranted = await _requestStoragePermission();
         if (!permissionGranted) {
           if (mounted) {
+            Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Storage permission denied', style: GoogleFonts.poppins())),
             );
@@ -341,6 +479,7 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
         final file = File(filePath);
         if (await file.exists()) {
           if (mounted) {
+            Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('Drawing downloaded to $filePath', style: GoogleFonts.poppins()),
@@ -355,16 +494,10 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
         } else {
           throw 'Failed to download drawing';
         }
-      } else {
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        } else {
-          throw 'Could not download drawing';
-        }
       }
     } catch (e) {
       if (mounted) {
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error downloading drawing: $e', style: GoogleFonts.poppins())),
         );
@@ -391,6 +524,8 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
   }
 
   Future<void> _deleteDocument(String downloadUrl, String fileName, String docId) async {
+    if (!mounted) return;
+    
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -414,10 +549,28 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
       return;
     }
 
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text('Deleting...', style: GoogleFonts.poppins()),
+          ],
+        ),
+      ),
+    );
+
     try {
       await FirebaseStorage.instance.refFromURL(downloadUrl).delete();
       await FirebaseFirestore.instance.collection('Drawings').doc(docId).delete();
       if (mounted) {
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Drawing deleted successfully', style: GoogleFonts.poppins())),
         );
@@ -425,6 +578,7 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
       logger.i('Deleted drawing: $fileName, docId: $docId');
     } catch (e) {
       if (mounted) {
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error deleting drawing: $e', style: GoogleFonts.poppins())),
         );
@@ -488,13 +642,35 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Uploaded Drawings',
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.bold,
-              fontSize: fontSizeTitle,
-              color: Colors.blueGrey[900],
-            ),
+          Row(
+            children: [
+              Text(
+                'Uploaded Drawings',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold,
+                  fontSize: fontSizeTitle,
+                  color: Colors.blueGrey[900],
+                ),
+              ),
+              if (kIsWeb) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'WEB',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[800],
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 16),
           StreamBuilder<QuerySnapshot>(
@@ -513,9 +689,37 @@ class _DrawingsScreenState extends State<DrawingsScreen> {
               }
               final docs = snapshot.data?.docs ?? [];
               if (docs.isEmpty) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Text('No drawings uploaded yet', style: GoogleFonts.poppins()),
+                return Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.architecture,
+                          size: 64,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No drawings uploaded yet',
+                          style: GoogleFonts.poppins(
+                            fontSize: fontSizeSubtitle,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Tap the + button to upload your first drawing',
+                          style: GoogleFonts.poppins(
+                            fontSize: fontSizeSubtitle - 2,
+                            color: Colors.grey[500],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               }
               return ListView.builder(

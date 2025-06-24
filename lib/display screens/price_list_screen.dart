@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -103,6 +104,7 @@ class _PriceListScreenState extends State<PriceListScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
+        withData: kIsWeb,
       );
       if (result == null || result.files.isEmpty) {
         logger.w('No file selected');
@@ -110,9 +112,10 @@ class _PriceListScreenState extends State<PriceListScreen> {
         return;
       }
 
-      final file = File(result.files.single.path!);
-      final fileName = result.files.single.name;
+      final platformFile = result.files.single;
+      final fileName = platformFile.name;
       final user = FirebaseAuth.instance.currentUser;
+      
       if (user == null) {
         logger.w('No authenticated user for upload');
         if (mounted) _showSnackBar('Please sign in to upload price lists');
@@ -126,7 +129,29 @@ class _PriceListScreenState extends State<PriceListScreen> {
         context: context,
         builder: (context) => AlertDialog(
           title: Text('Confirm Upload', style: GoogleFonts.poppins()),
-          content: Text('Do you want to upload the file: $fileName?', style: GoogleFonts.poppins()),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (kIsWeb) 
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'WEB',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[800],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Text('Do you want to upload the file: $fileName?', style: GoogleFonts.poppins()),
+            ],
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -173,6 +198,16 @@ class _PriceListScreenState extends State<PriceListScreen> {
                       : 'Starting upload...',
                   style: GoogleFonts.poppins(),
                 ),
+                if (kIsWeb) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Web Upload',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.blue[600],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -182,7 +217,41 @@ class _PriceListScreenState extends State<PriceListScreen> {
       final storageRef = FirebaseStorage.instance
           .ref()
           .child('facilities/${widget.facilityId}/price_list/${DateTime.now().millisecondsSinceEpoch}_$fileName');
-      final uploadTask = storageRef.putFile(file);
+
+      late UploadTask uploadTask;
+      
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        if (platformFile.bytes == null) {
+          throw 'File bytes not available for web/desktop upload';
+        }
+        
+        final metadata = SettableMetadata(
+          contentType: 'application/pdf',
+          customMetadata: {
+            'uploadedBy': user.uid,
+            'originalName': fileName,
+            'platform': kIsWeb ? 'web' : Platform.operatingSystem,
+          },
+        );
+        
+        uploadTask = storageRef.putData(platformFile.bytes!, metadata);
+      } else {
+        if (platformFile.path == null) {
+          throw 'File path not available for mobile upload';
+        }
+        
+        final file = File(platformFile.path!);
+        final metadata = SettableMetadata(
+          contentType: 'application/pdf',
+          customMetadata: {
+            'uploadedBy': user.uid,
+            'originalName': fileName,
+            'platform': Platform.operatingSystem,
+          },
+        );
+        
+        uploadTask = storageRef.putFile(file, metadata);
+      }
 
       uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
         if (mounted) {
@@ -204,6 +273,7 @@ class _PriceListScreenState extends State<PriceListScreen> {
         'downloadUrl': downloadUrl,
         'uploadedAt': FieldValue.serverTimestamp(),
         'facilityId': widget.facilityId,
+        'platform': kIsWeb ? 'web' : Platform.operatingSystem,
       });
 
       if (mounted) {
@@ -229,9 +299,34 @@ class _PriceListScreenState extends State<PriceListScreen> {
   }
 
   Future<void> _viewDocument(String url, String fileName) async {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text('Loading document...', style: GoogleFonts.poppins()),
+          ],
+        ),
+      ),
+    );
+
     try {
       logger.i('Viewing document: $fileName, url: $url');
-      if (Platform.isAndroid || Platform.isIOS) {
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        Navigator.pop(context);
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw 'Could not open price list in browser';
+        }
+      } else if (Platform.isAndroid || Platform.isIOS) {
         if (fileName.toLowerCase().endsWith('.pdf')) {
           final tempDir = await getTemporaryDirectory();
           final filePath = '${tempDir.path}/$fileName';
@@ -239,6 +334,7 @@ class _PriceListScreenState extends State<PriceListScreen> {
           final file = File(filePath);
           if (await file.exists()) {
             if (mounted) {
+              Navigator.pop(context);
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -250,29 +346,54 @@ class _PriceListScreenState extends State<PriceListScreen> {
             throw 'Failed to download PDF';
           }
         } else {
+          Navigator.pop(context);
           throw 'Only PDF viewing supported on mobile';
-        }
-      } else {
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.inAppWebView);
-        } else {
-          throw 'Could not open price list';
         }
       }
     } catch (e, stackTrace) {
       logger.e('Error viewing price list: $e', stackTrace: stackTrace);
-      if (mounted) _showSnackBar('Error viewing price list: $e');
+      if (mounted) {
+        Navigator.pop(context);
+        _showSnackBar('Error viewing price list: $e');
+      }
     }
   }
 
   Future<void> _downloadDocument(String url, String fileName) async {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text('Downloading...', style: GoogleFonts.poppins()),
+          ],
+        ),
+      ),
+    );
+
     try {
       logger.i('Downloading document: $fileName, url: $url');
-      if (Platform.isAndroid || Platform.isIOS) {
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        Navigator.pop(context);
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw 'Could not download price list';
+        }
+      } else if (Platform.isAndroid || Platform.isIOS) {
         bool permissionGranted = await _requestStoragePermission();
         if (!permissionGranted) {
-          if (mounted) _showSnackBar('Storage permission denied');
+          if (mounted) {
+            Navigator.pop(context);
+            _showSnackBar('Storage permission denied');
+          }
           return;
         }
 
@@ -283,6 +404,7 @@ class _PriceListScreenState extends State<PriceListScreen> {
         final file = File(filePath);
         if (await file.exists()) {
           if (mounted) {
+            Navigator.pop(context);
             _showSnackBar('Price list downloaded to $filePath', action: SnackBarAction(
               label: 'Open',
               onPressed: () => OpenFile.open(filePath),
@@ -292,17 +414,13 @@ class _PriceListScreenState extends State<PriceListScreen> {
         } else {
           throw 'Failed to download price list';
         }
-      } else {
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        } else {
-          throw 'Could not download price list';
-        }
       }
     } catch (e, stackTrace) {
       logger.e('Error downloading price list: $e', stackTrace: stackTrace);
-      if (mounted) _showSnackBar('Error downloading price list: $e');
+      if (mounted) {
+        Navigator.pop(context);
+        _showSnackBar('Error downloading price list: $e');
+      }
     }
   }
 
@@ -355,14 +473,37 @@ class _PriceListScreenState extends State<PriceListScreen> {
       return;
     }
 
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text('Deleting...', style: GoogleFonts.poppins()),
+            ],
+          ),
+        ),
+      );
+    }
+
     try {
       await FirebaseStorage.instance.refFromURL(downloadUrl).delete();
       await FirebaseFirestore.instance.collection('PriceList').doc(docId).delete();
-      if (mounted) _showSnackBar('Price list deleted successfully');
+      if (mounted) {
+        Navigator.pop(context);
+        _showSnackBar('Price list deleted successfully');
+      }
       logger.i('Deleted price list: $fileName, docId: $docId');
     } catch (e, stackTrace) {
       logger.e('Error deleting price list: $e', stackTrace: stackTrace);
-      if (mounted) _showSnackBar('Error deleting price list: $e');
+      if (mounted) {
+        Navigator.pop(context);
+        _showSnackBar('Error deleting price list: $e');
+      }
     }
   }
 
@@ -420,13 +561,35 @@ class _PriceListScreenState extends State<PriceListScreen> {
         children: [
           if (_showForm) _buildUploadForm(padding, fontSizeTitle, fontSizeSubtitle),
           const SizedBox(height: 24),
-          Text(
-            'Uploaded Price Lists',
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.bold,
-              fontSize: fontSizeTitle,
-              color: Colors.blueGrey[900],
-            ),
+          Row(
+            children: [
+              Text(
+                'Uploaded Price Lists',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold,
+                  fontSize: fontSizeTitle,
+                  color: Colors.blueGrey[900],
+                ),
+              ),
+              if (kIsWeb) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'WEB',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[800],
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 16),
           StreamBuilder<QuerySnapshot>(
@@ -447,9 +610,37 @@ class _PriceListScreenState extends State<PriceListScreen> {
               final docs = snapshot.data?.docs ?? [];
               if (docs.isEmpty) {
                 logger.w('No price lists found for facilityId: ${widget.facilityId}');
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Text('No price lists uploaded yet', style: GoogleFonts.poppins(fontSize: fontSizeSubtitle)),
+                return Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.picture_as_pdf,
+                          size: 64,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No price lists uploaded yet',
+                          style: GoogleFonts.poppins(
+                            fontSize: fontSizeSubtitle,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Tap the upload button to add your first price list',
+                          style: GoogleFonts.poppins(
+                            fontSize: fontSizeSubtitle - 2,
+                            color: Colors.grey[500],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               }
               logger.i('Found ${docs.length} price lists');
@@ -486,13 +677,35 @@ class _PriceListScreenState extends State<PriceListScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Upload Price List',
-                    style: GoogleFonts.poppins(
-                      fontSize: fontSizeTitle,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey[900],
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        'Upload Price List',
+                        style: GoogleFonts.poppins(
+                          fontSize: fontSizeTitle,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blueGrey[900],
+                        ),
+                      ),
+                      if (kIsWeb) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[100],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'WEB',
+                            style: GoogleFonts.poppins(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue[800],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.blueGrey),
