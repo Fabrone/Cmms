@@ -4,9 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
-import 'package:cmms/models/maintenance_task_model.dart';
-import 'package:cmms/developer/notification_setup_screen.dart';
-import 'package:cmms/services/notification_service.dart';
+import 'package:cmms/notifications/models/maintenance_task_model.dart';
+import 'package:cmms/notifications/screens/system_notifications_screen.dart';
+import 'package:cmms/notifications/screens/notification_status_screen.dart';
 
 class MaintenanceTasksScreen extends StatefulWidget {
   const MaintenanceTasksScreen({super.key});
@@ -251,6 +251,30 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
               icon: const Icon(Icons.edit, color: Colors.white),
               label: Text('Edit', style: GoogleFonts.poppins(color: Colors.white)),
             ),
+            IconButton(
+              icon: const Icon(Icons.analytics, color: Colors.white),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const NotificationStatusScreen(),
+                  ),
+                );
+              },
+              tooltip: 'Notification Status',
+            ),
+            IconButton(
+              icon: const Icon(Icons.notifications_active, color: Colors.white),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const SystemNotificationsScreen(),
+                  ),
+                );
+              },
+              tooltip: 'System Notifications',
+            ),
           ],
         ),
         body: Padding(
@@ -381,61 +405,6 @@ class MaintenanceTasksScreenState extends State<MaintenanceTasksScreen> {
                 ),
               ],
             ),
-            
-            // Setup Notification Button (only show when not editing)
-            if (_selectedDocId == null) ...[
-              const SizedBox(height: 16),
-              Center(
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    if (mounted) {
-                      final result = await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const NotificationSetupScreen(),
-                        ),
-                      );
-                      
-                      if (mounted && result == true) {
-                        _resetForm();
-                      }
-                    }
-                  },
-                  icon: const Icon(Icons.notifications_active),
-                  label: Text('Setup Notification', style: GoogleFonts.poppins()),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  ),
-                ),
-              ),
-            ],
-            // Test Notification Button (only show when not editing)
-            if (_selectedDocId == null) ...[
-              const SizedBox(height: 12),
-              Center(
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    try {
-                      await NotificationService().triggerTestNotification();
-                      _showSnackBar('Test notification sent successfully!');
-                    } catch (e) {
-                      _showSnackBar('Error sending test notification: $e');
-                    }
-                  },
-                  icon: const Icon(Icons.send),
-                  label: Text('Send Test Notification', style: GoogleFonts.poppins()),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  ),
-                ),
-              ),
-            ],
           ],
         ),
       ),

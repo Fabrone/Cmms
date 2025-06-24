@@ -1,5 +1,6 @@
 import 'package:cmms/developer/collection_detail_screen.dart';
 import 'package:cmms/developer/maintenance_tasks_screen.dart';
+import 'package:cmms/notifications/screens/system_notifications_screen.dart';
 import 'package:flutter/material.dart';
 
 class DeveloperScreen extends StatefulWidget {
@@ -109,6 +110,18 @@ class DeveloperScreenState extends State<DeveloperScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (context) => const MaintenanceTasksScreen(),
+                      ),
+                    ),
+                  ),
+                  // NEW: System Notifications Access
+                  ListTile(
+                    leading: const Icon(Icons.notifications_active, color: Colors.blueGrey),
+                    title: const Text('System Notifications'),
+                    subtitle: const Text('Manage notification system'),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const SystemNotificationsScreen(),
                       ),
                     ),
                   ),

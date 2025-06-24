@@ -6,6 +6,7 @@ import 'package:cmms/screens/profile_screen.dart';
 import 'package:cmms/screens/about_screen.dart';
 import 'package:cmms/screens/help_support_screen.dart';
 import 'package:cmms/widgets/responsive_screen_wrapper.dart';
+import 'package:cmms/services/notification_service.dart';
 import 'package:logger/logger.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -19,12 +20,14 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final Logger _logger = Logger(printer: PrettyPrinter());
+  final NotificationService _notificationService = NotificationService();
   
   bool _notificationsEnabled = true;
   bool _emailNotifications = true;
   bool _pushNotifications = true;
   String _selectedTheme = 'System';
   String _selectedLanguage = 'English';
+  bool _isLoadingNotifications = true;
   
   String _currentRole = 'User';
   String _organization = '-';
@@ -33,6 +36,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _getCurrentUserRole();
+    _loadNotificationSettings();
+  }
+
+  Future<void> _loadNotificationSettings() async {
+    try {
+      final enabled = await _notificationService.areNotificationsEnabled();
+      if (mounted) {
+        setState(() {
+          _notificationsEnabled = enabled;
+          _isLoadingNotifications = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingNotifications = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _updateNotificationSettings(bool enabled) async {
+    try {
+      await _notificationService.setNotificationsEnabled(enabled);
+      if (mounted) {
+        setState(() {
+          _notificationsEnabled = enabled;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              enabled 
+                  ? 'Notifications enabled successfully' 
+                  : 'Notifications disabled successfully',
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: enabled ? Colors.green : Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Error updating notification settings: $e',
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _getCurrentUserRole() async {
@@ -154,48 +211,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Notifications',
-                    style: GoogleFonts.poppins(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey[800],
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        'Notifications',
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blueGrey[800],
+                        ),
+                      ),
+                      const Spacer(),
+                    ],
                   ),
                   const SizedBox(height: 16),
                   
-                  SwitchListTile(
-                    title: Text('Enable Notifications', style: GoogleFonts.poppins()),
-                    subtitle: Text('Receive maintenance reminders', style: GoogleFonts.poppins(fontSize: 12)),
-                    value: _notificationsEnabled,
-                    onChanged: (value) {
-                      setState(() {
-                        _notificationsEnabled = value;
-                      });
-                    },
-                  ),
-                  
-                  SwitchListTile(
-                    title: Text('Email Notifications', style: GoogleFonts.poppins()),
-                    subtitle: Text('Receive notifications via email', style: GoogleFonts.poppins(fontSize: 12)),
-                    value: _emailNotifications,
-                    onChanged: _notificationsEnabled ? (value) {
-                      setState(() {
-                        _emailNotifications = value;
-                      });
-                    } : null,
-                  ),
-                  
-                  SwitchListTile(
-                    title: Text('Push Notifications', style: GoogleFonts.poppins()),
-                    subtitle: Text('Receive push notifications on device', style: GoogleFonts.poppins(fontSize: 12)),
-                    value: _pushNotifications,
-                    onChanged: _notificationsEnabled ? (value) {
-                      setState(() {
-                        _pushNotifications = value;
-                      });
-                    } : null,
-                  ),
+                  if (_isLoadingNotifications)
+                    const Center(child: CircularProgressIndicator())
+                  else ...[
+                    SwitchListTile(
+                      title: Text('Enable Notifications', style: GoogleFonts.poppins()),
+                      subtitle: Text(
+                        _notificationsEnabled 
+                            ? 'Receive maintenance reminders' 
+                            : 'Notifications are disabled',
+                        style: GoogleFonts.poppins(fontSize: 12),
+                      ),
+                      value: _notificationsEnabled,
+                      onChanged: _updateNotificationSettings,
+                      activeColor: Colors.blueGrey,
+                    ),
+                    
+                    SwitchListTile(
+                      title: Text('Email Notifications', style: GoogleFonts.poppins()),
+                      subtitle: Text('Receive notifications via email', style: GoogleFonts.poppins(fontSize: 12)),
+                      value: _emailNotifications,
+                      onChanged: _notificationsEnabled ? (value) {
+                        setState(() {
+                          _emailNotifications = value;
+                        });
+                      } : null,
+                    ),
+                    
+                    SwitchListTile(
+                      title: Text('Push Notifications', style: GoogleFonts.poppins()),
+                      subtitle: Text('Receive push notifications on device', style: GoogleFonts.poppins(fontSize: 12)),
+                      value: _pushNotifications,
+                      onChanged: _notificationsEnabled ? (value) {
+                        setState(() {
+                          _pushNotifications = value;
+                        });
+                      } : null,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -243,7 +311,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           
           const SizedBox(height: 16),
           
-          // Support & Information - ONLY ACCESSIBLE FROM SETTINGS
+          // Support & Information
           Card(
             elevation: 4,
             child: Padding(

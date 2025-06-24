@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:cmms/models/notification_model.dart';
+import 'package:cmms/notifications/models/notification_model.dart';
 import 'package:cmms/models/task_status_model.dart';
 import 'package:cmms/models/task_display_model.dart';
 import 'package:cmms/services/task_display_service.dart';
-import 'package:cmms/services/notification_service.dart';
-import 'package:cmms/screens/notification_details_screen.dart';
+import 'package:cmms/notifications/services/notification_service.dart';
+import 'package:cmms/notifications/screens/notification_detail_screen.dart';
+import 'package:cmms/notifications/screens/system_notifications_screen.dart';
 import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -59,7 +60,7 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
         newOrg = adminData?['organization'] ?? '-';
       } 
       else if (developerDoc.exists) {
-        newRole = 'Technician';
+        newRole = 'Developer';
         newOrg = 'JV Almacis';
       }
       else if (technicianDoc.exists) {
@@ -96,6 +97,22 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
       facilityId: widget.facilityId,
       currentRole: _currentRole,
       organization: _organization,
+      actions: [
+        // System Notifications Button (replaces old notification buttons)
+        if (_currentRole == 'Developer' || _currentRole == 'Admin')
+          IconButton(
+            icon: const Icon(Icons.notifications_active, color: Colors.white),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const SystemNotificationsScreen(),
+                ),
+              );
+            },
+            tooltip: 'System Notifications',
+          ),
+      ],
       child: _buildBody(),
     );
   }
@@ -185,9 +202,6 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
       ],
     );
   }
-
-  // Rest of the methods remain the same as in the original file...
-  // (All the task management, notification handling, and UI building methods)
   
   Widget _buildTasksTab() {
     if (_selectedCategory == null) {
@@ -314,9 +328,9 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
                                 spacing: 8,
                                 runSpacing: 4,
                                 children: [
-                                  _buildTaskCountChip('Total', category.totalTasks, Colors.blueGrey),
+                                  _buildTaskCountChip('Total', category.totalTasks, const Color.fromARGB(255, 8, 19, 24)),
                                   _buildTaskCountChip('Waiting', category.waitingTasks, Colors.grey),
-                                  _buildTaskCountChip('In Progress', category.inProgressTasks, Colors.blueGrey[700]!),
+                                  _buildTaskCountChip('In Progress', category.inProgressTasks, const Color.fromARGB(255, 46, 63, 174)),
                                   _buildTaskCountChip('Completed', category.completedTasks, Colors.green),
                                   if (category.noStatusTasks > 0)
                                     _buildTaskCountChip('No Status', category.noStatusTasks, Colors.red),
@@ -845,7 +859,7 @@ class _PreventiveMaintenanceScreenState extends State<PreventiveMaintenanceScree
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => NotificationDetailsScreen(notifications: [notification]),
+              builder: (context) => NotificationDetailScreen(notification: notification),
             ),
           );
         },

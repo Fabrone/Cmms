@@ -1,10 +1,10 @@
-import 'package:cmms/notifications/screens/notification_setup_tracking_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cmms/models/maintenance_task_model.dart';
-import 'package:cmms/services/notification_service.dart';
+import 'package:cmms/notifications/models/maintenance_task_model.dart';
+import 'package:cmms/notifications/services/notification_service.dart';
+import 'package:cmms/notifications/screens/notification_setup_tracking_screen.dart';
 
 class NotificationSetupScreen extends StatefulWidget {
   const NotificationSetupScreen({super.key});
@@ -24,17 +24,17 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
   final NotificationService _notificationService = NotificationService();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   
-  List<CategoryInfo> _categories = [];
+  List<CategoryTaskGroup> _categoryGroups = [];
   bool _isLoading = true;
   
   @override
   void initState() {
     super.initState();
     _notificationService.initialize();
-    _loadCategories();
+    _loadCategoryGroups();
   }
   
-  Future<void> _loadCategories() async {
+  Future<void> _loadCategoryGroups() async {
     try {
       setState(() {
         _isLoading = true;
@@ -45,38 +45,51 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
           .orderBy('category')
           .get();
       
-      // Group tasks by category
-      final Map<String, List<MaintenanceTaskModel>> groupedTasks = {};
+      // Group tasks by category and frequency
+      final Map<String, Map<int, List<MaintenanceTaskModel>>> groupedTasks = {};
       
       for (var doc in tasksSnapshot.docs) {
         final task = MaintenanceTaskModel.fromFirestore(doc);
+        
         if (!groupedTasks.containsKey(task.category)) {
-          groupedTasks[task.category] = [];
+          groupedTasks[task.category] = {};
         }
-        groupedTasks[task.category]!.add(task);
+        
+        if (!groupedTasks[task.category]!.containsKey(task.frequency)) {
+          groupedTasks[task.category]![task.frequency] = [];
+        }
+        
+        groupedTasks[task.category]![task.frequency]!.add(task);
       }
       
-      // Create category info list
-      final categories = <CategoryInfo>[];
-      groupedTasks.forEach((category, tasks) {
-        // Use the most common frequency for the category
-        final frequencies = tasks.map((t) => t.frequency).toList();
-        final frequency = frequencies.isNotEmpty ? frequencies.first : 0;
+      // Create category groups with frequency subgroups
+      final categoryGroups = <CategoryTaskGroup>[];
+      groupedTasks.forEach((category, frequencyMap) {
+        final frequencyGroups = <FrequencyTaskGroup>[];
         
-        categories.add(CategoryInfo(
+        frequencyMap.forEach((frequency, tasks) {
+          frequencyGroups.add(FrequencyTaskGroup(
+            frequency: frequency,
+            tasks: tasks,
+          ));
+        });
+        
+        // Sort frequency groups by frequency
+        frequencyGroups.sort((a, b) => a.frequency.compareTo(b.frequency));
+        
+        categoryGroups.add(CategoryTaskGroup(
           category: category,
-          frequency: frequency,
-          tasks: tasks,
+          frequencyGroups: frequencyGroups,
         ));
       });
       
       setState(() {
-        _categories = categories;
+        _categoryGroups = categoryGroups;
         _isLoading = false;
       });
       
     } catch (e) {
-      logger.e('Error loading categories: $e');
+      logger.e('Error loading category groups: $e');
       setState(() {
         _isLoading = false;
       });
@@ -105,12 +118,12 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
   
   void _calculateDates() {
     if (_lastInspectionDate != null) {
-      final selectedCategories = _categories.where((c) => c.isSelected).toList();
+      final selectedTasks = _getSelectedTasks();
       
-      if (selectedCategories.isNotEmpty) {
-        // Use the shortest frequency among selected categories for notification timing
-        final shortestFrequency = selectedCategories
-            .map((c) => c.frequency)
+      if (selectedTasks.isNotEmpty) {
+        // Use the shortest frequency among selected tasks for notification timing
+        final shortestFrequency = selectedTasks
+            .map((t) => t.frequency)
             .reduce((a, b) => a < b ? a : b);
         
         final dates = _notificationService.calculateNotificationDates(
@@ -126,11 +139,90 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
     }
   }
   
-  Future<void> _setupNotification() async {
-    final selectedCategories = _categories.where((c) => c.isSelected).toList();
+  List<MaintenanceTaskModel> _getSelectedTasks() {
+    final List<MaintenanceTaskModel> selectedTasks = [];
     
-    if (selectedCategories.isEmpty) {
-      _showSnackBar('Please select at least one category');
+    for (final categoryGroup in _categoryGroups) {
+      for (final frequencyGroup in categoryGroup.frequencyGroups) {
+        if (frequencyGroup.isSelected == true) {
+          selectedTasks.addAll(frequencyGroup.tasks);
+        } else {
+          // Check individual task selections
+          for (final task in frequencyGroup.tasks) {
+            if (frequencyGroup.selectedTasks.contains(task)) {
+              selectedTasks.add(task);
+            }
+          }
+        }
+      }
+    }
+    
+    return selectedTasks;
+  }
+  
+  void _toggleCategorySelection(CategoryTaskGroup categoryGroup, bool? value) {
+    setState(() {
+      for (final frequencyGroup in categoryGroup.frequencyGroups) {
+        frequencyGroup.isSelected = value ?? false;
+        if (value == true) {
+          frequencyGroup.selectedTasks.clear();
+          frequencyGroup.selectedTasks.addAll(frequencyGroup.tasks);
+        } else {
+          frequencyGroup.selectedTasks.clear();
+        }
+      }
+      _calculateDates();
+    });
+  }
+  
+  void _toggleFrequencyGroupSelection(FrequencyTaskGroup frequencyGroup, bool? value) {
+    setState(() {
+      frequencyGroup.isSelected = value ?? false;
+      if (value == true) {
+        frequencyGroup.selectedTasks.clear();
+        frequencyGroup.selectedTasks.addAll(frequencyGroup.tasks);
+      } else {
+        frequencyGroup.selectedTasks.clear();
+      }
+      _calculateDates();
+    });
+  }
+  
+  void _toggleTaskSelection(FrequencyTaskGroup frequencyGroup, MaintenanceTaskModel task, bool? value) {
+    setState(() {
+      if (value == true) {
+        frequencyGroup.selectedTasks.add(task);
+      } else {
+        frequencyGroup.selectedTasks.remove(task);
+      }
+      
+      // Update frequency group selection state
+      if (frequencyGroup.selectedTasks.length == frequencyGroup.tasks.length) {
+        frequencyGroup.isSelected = true;
+      } else if (frequencyGroup.selectedTasks.isEmpty) {
+        frequencyGroup.isSelected = false;
+      } else {
+        frequencyGroup.isSelected = null; // Indeterminate state
+      }
+      
+      _calculateDates();
+    });
+  }
+  
+  bool _isCategoryFullySelected(CategoryTaskGroup categoryGroup) {
+    return categoryGroup.frequencyGroups.every((fg) => fg.isSelected == true);
+  }
+  
+  bool _isCategoryPartiallySelected(CategoryTaskGroup categoryGroup) {
+    return categoryGroup.frequencyGroups.any((fg) => 
+        fg.isSelected == true || fg.selectedTasks.isNotEmpty);
+  }
+  
+  Future<void> _setupNotification() async {
+    final selectedTasks = _getSelectedTasks();
+    
+    if (selectedTasks.isEmpty) {
+      _showSnackBar('Please select at least one task');
       return;
     }
     
@@ -140,23 +232,23 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
     }
     
     try {
-      // Get all technician IDs
-      final technicianIds = await _notificationService.getTechnicianIds();
+      // Get all user IDs (not just technicians)
+      final userIds = await _notificationService.getAllUserIds();
       
-      if (technicianIds.isEmpty) {
-        _showSnackBar('No technicians found in the system');
+      if (userIds.isEmpty) {
+        _showSnackBar('No users found in the system');
         return;
       }
       
-      // Create notifications for all selected categories as a group
-      final notificationId = await _notificationService.createGroupedNotification(
-        categories: selectedCategories,
+      // Create frequency-based notifications
+      final notificationId = await _notificationService.createFrequencyBasedNotification(
+        tasks: selectedTasks,
         lastInspectionDate: _lastInspectionDate!,
-        assignedTechnicians: technicianIds,
+        assignedUsers: userIds,
       );
       
-      _showSnackBar('Notification scheduled successfully for ${selectedCategories.length} categories!');
-      logger.i('Grouped notification created with ID: $notificationId');
+      _showSnackBar('Notification scheduled successfully for ${selectedTasks.length} tasks!');
+      logger.i('Frequency-based notification created with ID: $notificationId');
       
       if (mounted) {
         Navigator.pop(context, true);
@@ -188,7 +280,7 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: Text(
-            'Setup Notification',
+            'Setup Custom Notification',
             style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold),
           ),
           backgroundColor: Colors.blueGrey,
@@ -219,7 +311,7 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Categories Selection Card
+                      // Task Selection Card
                       Card(
                         elevation: 4,
                         child: Padding(
@@ -228,7 +320,7 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Select Categories for Notification',
+                                'Select Tasks for Notification',
                                 style: GoogleFonts.poppins(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
@@ -237,7 +329,7 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
                               ),
                               const SizedBox(height: 12),
                               Text(
-                                'Choose one or more categories to group in a single notification:',
+                                'Tasks are grouped by category and frequency. Select individual tasks or entire groups:',
                                 style: GoogleFonts.poppins(
                                   color: Colors.grey[600],
                                   fontSize: 14,
@@ -245,7 +337,7 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
                               ),
                               const SizedBox(height: 16),
                               
-                              if (_categories.isEmpty)
+                              if (_categoryGroups.isEmpty)
                                 Center(
                                   child: Text(
                                     'No categories found. Please add some maintenance tasks first.',
@@ -253,52 +345,113 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
                                   ),
                                 )
                               else
-                                ...(_categories.map((categoryInfo) => Card(
+                                ...(_categoryGroups.map((categoryGroup) => Card(
                                   margin: const EdgeInsets.only(bottom: 8),
                                   elevation: 1,
-                                  child: CheckboxListTile(
-                                    value: categoryInfo.isSelected,
-                                    onChanged: (bool? value) {
-                                      setState(() {
-                                        categoryInfo.isSelected = value ?? false;
-                                        _calculateDates();
-                                      });
-                                    },
-                                    title: Text(
-                                      categoryInfo.category,
-                                      style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+                                  child: Theme(
+                                    data: Theme.of(context).copyWith(
+                                      dividerColor: Colors.transparent,
                                     ),
-                                    subtitle: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                    child: ExpansionTile(
+                                      leading: Checkbox(
+                                        value: _isCategoryFullySelected(categoryGroup) 
+                                            ? true 
+                                            : _isCategoryPartiallySelected(categoryGroup) 
+                                                ? null 
+                                                : false,
+                                        tristate: true,
+                                        onChanged: (value) => _toggleCategorySelection(categoryGroup, value),
+                                      ),
+                                      title: Text(
+                                        categoryGroup.category,
+                                        style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+                                      ),
+                                      subtitle: Text(
+                                        '${categoryGroup.frequencyGroups.length} frequency groups, ${categoryGroup.getTotalTasks()} total tasks',
+                                        style: GoogleFonts.poppins(fontSize: 12),
+                                      ),
                                       children: [
-                                        Text(
-                                          'Frequency: ${categoryInfo.frequency} months',
-                                          style: GoogleFonts.poppins(fontSize: 12),
-                                        ),
-                                        Text(
-                                          '${categoryInfo.tasks.length} task(s) in this category',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 11,
-                                            color: Colors.grey[600],
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                                          child: Column(
+                                            children: categoryGroup.frequencyGroups.map((frequencyGroup) {
+                                              return Card(
+                                                margin: const EdgeInsets.only(bottom: 8),
+                                                color: Colors.grey[50],
+                                                child: Theme(
+                                                  data: Theme.of(context).copyWith(
+                                                    dividerColor: Colors.transparent,
+                                                  ),
+                                                  child: ExpansionTile(
+                                                    leading: Checkbox(
+                                                      value: frequencyGroup.isSelected,
+                                                      tristate: true,
+                                                      onChanged: (value) => _toggleFrequencyGroupSelection(frequencyGroup, value),
+                                                    ),
+                                                    title: Row(
+                                                      children: [
+                                                        Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                          decoration: BoxDecoration(
+                                                            color: Colors.blueGrey[100],
+                                                            borderRadius: BorderRadius.circular(12),
+                                                          ),
+                                                          child: Text(
+                                                            '${frequencyGroup.frequency} months',
+                                                            style: GoogleFonts.poppins(
+                                                              fontSize: 12,
+                                                              fontWeight: FontWeight.bold,
+                                                              color: Colors.blueGrey[700],
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        const SizedBox(width: 8),
+                                                        Text(
+                                                          '${frequencyGroup.tasks.length} tasks',
+                                                          style: GoogleFonts.poppins(fontSize: 14),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    children: [
+                                                      Padding(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                                                        child: Column(
+                                                          children: frequencyGroup.tasks.map((task) {
+                                                            final isSelected = frequencyGroup.selectedTasks.contains(task);
+                                                            return CheckboxListTile(
+                                                              value: isSelected,
+                                                              onChanged: (value) => _toggleTaskSelection(frequencyGroup, task, value),
+                                                              title: Text(
+                                                                task.component,
+                                                                style: GoogleFonts.poppins(
+                                                                  fontSize: 13,
+                                                                  fontWeight: FontWeight.w500,
+                                                                ),
+                                                              ),
+                                                              subtitle: Text(
+                                                                task.intervention,
+                                                                style: GoogleFonts.poppins(
+                                                                  fontSize: 11,
+                                                                  color: Colors.grey[600],
+                                                                ),
+                                                                maxLines: 2,
+                                                                overflow: TextOverflow.ellipsis,
+                                                              ),
+                                                              controlAffinity: ListTileControlAffinity.leading,
+                                                              dense: true,
+                                                            );
+                                                          }).toList(),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              );
+                                            }).toList(),
                                           ),
                                         ),
                                       ],
                                     ),
-                                    secondary: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.blueGrey[100],
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        '${categoryInfo.frequency}m',
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    controlAffinity: ListTileControlAffinity.leading,
                                   ),
                                 ))),
                             ],
@@ -363,7 +516,7 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
                               const SizedBox(height: 20),
                               
                               // Calculated Dates
-                              if (_lastInspectionDate != null && _categories.any((c) => c.isSelected)) ...[
+                              if (_lastInspectionDate != null && _getSelectedTasks().isNotEmpty) ...[
                                 const Divider(),
                                 const SizedBox(height: 16),
                                 Text(
@@ -409,7 +562,7 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
                                           const SizedBox(width: 8),
                                           Expanded(
                                             child: Text(
-                                              'Selected Categories: ${_categories.where((c) => c.isSelected).map((c) => c.category).join(', ')}',
+                                              'Selected Tasks: ${_getSelectedTasks().length}',
                                               style: GoogleFonts.poppins(
                                                 color: Colors.blue[700],
                                                 fontSize: 13,
@@ -421,7 +574,7 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
                                       ),
                                       const SizedBox(height: 8),
                                       Text(
-                                        'Technicians will be notified at 9:00 AM, 5 days before the next inspection is due. All selected categories will be grouped in one notification.',
+                                        'All users will be notified at 9:00 AM, 5 days before the next inspection is due. Tasks with the same notification date will be grouped together.',
                                         style: GoogleFonts.poppins(
                                           color: Colors.blue[700],
                                           fontSize: 13,
@@ -448,7 +601,7 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
                           ),
                           const SizedBox(width: 12),
                           ElevatedButton.icon(
-                            onPressed: (_lastInspectionDate != null && _categories.any((c) => c.isSelected)) 
+                            onPressed: (_lastInspectionDate != null && _getSelectedTasks().isNotEmpty) 
                                 ? _setupNotification 
                                 : null,
                             icon: const Icon(Icons.notifications_active),
@@ -489,4 +642,31 @@ class NotificationSetupScreenState extends State<NotificationSetupScreen> {
       ],
     );
   }
+}
+
+// Helper classes for organizing tasks
+class CategoryTaskGroup {
+  final String category;
+  final List<FrequencyTaskGroup> frequencyGroups;
+
+  CategoryTaskGroup({
+    required this.category,
+    required this.frequencyGroups,
+  });
+
+  int getTotalTasks() {
+    return frequencyGroups.fold(0, (total, group) => total + group.tasks.length);
+  }
+}
+
+class FrequencyTaskGroup {
+  final int frequency;
+  final List<MaintenanceTaskModel> tasks;
+  final List<MaintenanceTaskModel> selectedTasks = [];
+  bool? isSelected = false; // null for indeterminate state
+
+  FrequencyTaskGroup({
+    required this.frequency,
+    required this.tasks,
+  });
 }

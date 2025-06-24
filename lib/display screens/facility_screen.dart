@@ -297,7 +297,7 @@ class FacilityScreenState extends State<FacilityScreen> {
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 color: isSelected
-                                    ? Colors.blueGrey[50]
+                                    ? Colors.grey[800]
                                     : isInteractable
                                         ? Colors.white
                                         : Colors.grey[200],
@@ -312,9 +312,11 @@ class FacilityScreenState extends State<FacilityScreen> {
                                         style: GoogleFonts.poppins(
                                           fontSize: isMobile ? 16 : 18,
                                           fontWeight: FontWeight.bold,
-                                          color: isInteractable
-                                              ? Colors.blueGrey[800]
-                                              : Colors.grey[600],
+                                          color: isSelected
+                                              ? Colors.white
+                                              : isInteractable
+                                                  ? Colors.blueGrey[800]
+                                                  : Colors.grey[600],
                                         ),
                                       ),
                                       const SizedBox(height: 4),
@@ -322,9 +324,11 @@ class FacilityScreenState extends State<FacilityScreen> {
                                         facility.location,
                                         style: GoogleFonts.poppins(
                                           fontSize: isMobile ? 14 : 16,
-                                          color: isInteractable
-                                              ? Colors.blueGrey[600]
-                                              : Colors.grey[500],
+                                          color: isSelected
+                                              ? Colors.white.withValues(alpha: 0.9)
+                                              : isInteractable
+                                                  ? Colors.blueGrey[600]
+                                                  : Colors.grey[500],
                                         ),
                                       ),
                                       if (facility.address != null) ...[
@@ -333,9 +337,11 @@ class FacilityScreenState extends State<FacilityScreen> {
                                           facility.address!,
                                           style: GoogleFonts.poppins(
                                             fontSize: isMobile ? 12 : 14,
-                                            color: isInteractable
-                                                ? Colors.blueGrey[500]
-                                                : Colors.grey[400],
+                                            color: isSelected
+                                                ? Colors.white.withValues(alpha: 0.8)
+                                                : isInteractable
+                                                    ? Colors.blueGrey[500]
+                                                    : Colors.grey[400],
                                           ),
                                         ),
                                       ],
@@ -344,9 +350,11 @@ class FacilityScreenState extends State<FacilityScreen> {
                                         'Added: ${facility.createdAt.toLocal().toString().split(' ')[0]}',
                                         style: GoogleFonts.poppins(
                                           fontSize: isMobile ? 12 : 14,
-                                          color: isInteractable
-                                              ? Colors.blueGrey[400]
-                                              : Colors.grey[400],
+                                          color: isSelected
+                                              ? Colors.white.withValues(alpha: 0.7)
+                                              : isInteractable
+                                                  ? Colors.blueGrey[400]
+                                                  : Colors.grey[400],
                                         ),
                                       ),
                                     ],
