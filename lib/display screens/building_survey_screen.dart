@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -150,12 +151,14 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
+        withData: kIsWeb, // Load bytes for web platforms
       );
       if (result == null || result.files.isEmpty) return;
 
-      final file = File(result.files.single.path!);
-      final fileName = result.files.single.name;
+      final platformFile = result.files.single;
+      final fileName = platformFile.name;
       final user = FirebaseAuth.instance.currentUser;
+      
       if (user == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -166,6 +169,7 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
       }
 
       final title = _titleController.text.trim().isEmpty ? fileName : _titleController.text.trim();
+      
       if (!mounted) {
         logger.w('Widget not mounted, skipping confirmation dialog for $fileName');
         return;
@@ -234,22 +238,73 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
         ),
       );
 
+      // Create storage reference
       final storageRef = FirebaseStorage.instance
           .ref()
           .child('facilities/${widget.facilityId}/building_surveys/${DateTime.now().millisecondsSinceEpoch}_$fileName');
-      final uploadTask = storageRef.putFile(file);
 
+      // Upload based on platform
+      UploadTask uploadTask;
+      
+      if (kIsWeb || Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        // Web and desktop platforms - use bytes
+        final Uint8List? fileBytes = platformFile.bytes;
+        if (fileBytes == null) {
+          throw 'Failed to read file data for web/desktop upload';
+        }
+        
+        final metadata = SettableMetadata(
+          contentType: 'application/pdf',
+          customMetadata: {
+            'originalName': fileName,
+            'uploadedBy': user.uid,
+            'facilityId': widget.facilityId,
+          },
+        );
+        
+        uploadTask = storageRef.putData(fileBytes, metadata);
+        logger.i('Uploading survey via bytes for web/desktop: $fileName');
+      } else {
+        // Mobile platforms - use file path
+        final String? filePath = platformFile.path;
+        if (filePath == null) {
+          throw 'Failed to get file path for mobile upload';
+        }
+        
+        final file = File(filePath);
+        if (!await file.exists()) {
+          throw 'Selected file does not exist';
+        }
+        
+        final metadata = SettableMetadata(
+          contentType: 'application/pdf',
+          customMetadata: {
+            'originalName': fileName,
+            'uploadedBy': user.uid,
+            'facilityId': widget.facilityId,
+          },
+        );
+        
+        uploadTask = storageRef.putFile(file, metadata);
+        logger.i('Uploading survey via file path for mobile: $fileName');
+      }
+
+      // Monitor upload progress
       uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
-        setState(() {
-          _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
-        });
+        if (mounted) {
+          setState(() {
+            _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
+          });
+        }
       }, onError: (e) {
         logger.e('Upload progress error: $e');
       });
 
+      // Wait for upload completion
       await uploadTask;
       final downloadUrl = await storageRef.getDownloadURL();
 
+      // Save to Firestore
       await FirebaseFirestore.instance.collection('BuildingSurveys').add({
         'userId': user.uid,
         'title': title,
@@ -258,39 +313,85 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
         'uploadedAt': FieldValue.serverTimestamp(),
         'facilityId': widget.facilityId,
         'category': _selectedCategory,
+        'fileSize': platformFile.size,
+        'platform': kIsWeb ? 'web' : Platform.operatingSystem,
       });
 
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Survey uploaded successfully', style: GoogleFonts.poppins())),
+          SnackBar(
+            content: Text('Survey uploaded successfully', style: GoogleFonts.poppins()),
+            backgroundColor: Colors.green[600],
+          ),
         );
         _titleController.clear();
       }
-      logger.i('Uploaded survey: $fileName, URL: $downloadUrl, facilityId: ${widget.facilityId}');
+      
+      logger.i('Successfully uploaded survey: $fileName, URL: $downloadUrl, facilityId: ${widget.facilityId}');
+      
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error uploading survey: $e', style: GoogleFonts.poppins())),
+          SnackBar(
+            content: Text('Error uploading survey: $e', style: GoogleFonts.poppins()),
+            backgroundColor: Colors.red[600],
+          ),
         );
       }
       logger.e('Error uploading survey: $e');
     } finally {
-      setState(() {
-        _uploadProgress = null;
-      });
+      if (mounted) {
+        setState(() {
+          _uploadProgress = null;
+        });
+      }
     }
   }
 
   Future<void> _viewDocument(String url, String fileName) async {
     try {
-      if (Platform.isAndroid || Platform.isIOS) {
+      if (kIsWeb) {
+        // Web platform - open in new tab
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw 'Could not open survey in browser';
+        }
+      } else if (Platform.isAndroid || Platform.isIOS) {
+        // Mobile platforms - download and view with PDF viewer
         if (fileName.toLowerCase().endsWith('.pdf')) {
           final tempDir = await getTemporaryDirectory();
           final filePath = '${tempDir.path}/$fileName';
+          
+          // Show download progress
+          if (mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => AlertDialog(
+                title: Text('Loading PDF...', style: GoogleFonts.poppins()),
+                content: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('Downloading PDF for viewing...'),
+                  ],
+                ),
+              ),
+            );
+          }
+          
           await Dio().download(url, filePath);
           final file = File(filePath);
+          
+          if (mounted) {
+            Navigator.pop(context); // Close loading dialog
+          }
+          
           if (await file.exists()) {
             if (mounted) {
               Navigator.push(
@@ -307,17 +408,23 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
           throw 'Only PDF viewing is supported on mobile';
         }
       } else {
+        // Desktop platforms - open with system default
         final uri = Uri.parse(url);
         if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.inAppWebView);
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
         } else {
           throw 'Could not open survey';
         }
       }
     } catch (e) {
       if (mounted) {
+        // Close any open dialogs
+        Navigator.of(context).popUntil((route) => route.isFirst);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error viewing survey: $e', style: GoogleFonts.poppins())),
+          SnackBar(
+            content: Text('Error viewing survey: $e', style: GoogleFonts.poppins()),
+            backgroundColor: Colors.red[600],
+          ),
         );
       }
       logger.e('Error viewing survey: $e');
@@ -326,7 +433,16 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
 
   Future<void> _downloadDocument(String url, String fileName) async {
     try {
-      if (Platform.isAndroid || Platform.isIOS) {
+      if (kIsWeb) {
+        // Web platform - trigger browser download
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw 'Could not download survey';
+        }
+      } else if (Platform.isAndroid || Platform.isIOS) {
+        // Mobile platforms - download to device storage
         bool permissionGranted = await _requestStoragePermission();
         if (!permissionGranted) {
           if (mounted) {
@@ -339,7 +455,31 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
 
         final downloadsDir = await getExternalStorageDirectory();
         final filePath = '${downloadsDir!.path}/$fileName';
+        
+        // Show download progress
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              title: Text('Downloading...', style: GoogleFonts.poppins()),
+              content: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Downloading survey to device...'),
+                ],
+              ),
+            ),
+          );
+        }
+        
         await Dio().download(url, filePath);
+        
+        if (mounted) {
+          Navigator.pop(context); // Close download dialog
+        }
 
         final file = File(filePath);
         if (await file.exists()) {
@@ -347,6 +487,7 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('Survey downloaded to $filePath', style: GoogleFonts.poppins()),
+                backgroundColor: Colors.green[600],
                 action: SnackBarAction(
                   label: 'Open',
                   onPressed: () => OpenFile.open(filePath),
@@ -359,6 +500,7 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
           throw 'Failed to download survey';
         }
       } else {
+        // Desktop platforms - save file dialog or direct download
         final uri = Uri.parse(url);
         if (await canLaunchUrl(uri)) {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -368,8 +510,13 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
       }
     } catch (e) {
       if (mounted) {
+        // Close any open dialogs
+        Navigator.of(context).popUntil((route) => route.isFirst);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error downloading survey: $e', style: GoogleFonts.poppins())),
+          SnackBar(
+            content: Text('Error downloading survey: $e', style: GoogleFonts.poppins()),
+            backgroundColor: Colors.red[600],
+          ),
         );
       }
       logger.e('Error downloading survey: $e');
@@ -418,18 +565,49 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
     }
 
     try {
-      await FirebaseStorage.instance.refFromURL(downloadUrl).delete();
-      await FirebaseFirestore.instance.collection('BuildingSurveys').doc(docId).delete();
+      // Show deletion progress
       if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: Text('Deleting...', style: GoogleFonts.poppins()),
+            content: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Deleting survey...'),
+              ],
+            ),
+          ),
+        );
+      }
+
+      // Delete from Firebase Storage
+      await FirebaseStorage.instance.refFromURL(downloadUrl).delete();
+      
+      // Delete from Firestore
+      await FirebaseFirestore.instance.collection('BuildingSurveys').doc(docId).delete();
+      
+      if (mounted) {
+        Navigator.pop(context); // Close deletion dialog
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Survey deleted successfully', style: GoogleFonts.poppins())),
+          SnackBar(
+            content: Text('Survey deleted successfully', style: GoogleFonts.poppins()),
+            backgroundColor: Colors.green[600],
+          ),
         );
       }
       logger.i('Deleted survey: $fileName, docId: $docId');
     } catch (e) {
       if (mounted) {
+        Navigator.pop(context); // Close deletion dialog
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting survey: $e', style: GoogleFonts.poppins())),
+          SnackBar(
+            content: Text('Error deleting survey: $e', style: GoogleFonts.poppins()),
+            backgroundColor: Colors.red[600],
+          ),
         );
       }
       logger.e('Error deleting survey: $e');
@@ -465,13 +643,35 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Uploaded Surveys',
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.bold,
-              fontSize: fontSizeTitle,
-              color: Colors.blueGrey[900],
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Uploaded Surveys',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    fontSize: fontSizeTitle,
+                    color: Colors.blueGrey[900],
+                  ),
+                ),
+              ),
+              if (kIsWeb)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'WEB',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[800],
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 16),
           StreamBuilder<QuerySnapshot>(
@@ -483,16 +683,52 @@ class _BuildingSurveyScreenState extends State<BuildingSurveyScreen> {
             builder: (context, snapshot) {
               if (snapshot.hasError) {
                 logger.e('StreamBuilder error: ${snapshot.error}');
-                return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
+                return Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      children: [
+                        Icon(Icons.error, color: Colors.red[600], size: 48),
+                        const SizedBox(height: 8),
+                        Text('Error loading surveys', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                        Text('${snapshot.error}', style: GoogleFonts.poppins(fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                );
               }
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
               final docs = snapshot.data?.docs ?? [];
               if (docs.isEmpty) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Text('No surveys uploaded yet', style: GoogleFonts.poppins()),
+                return Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      children: [
+                        Icon(Icons.assessment, color: Colors.grey[400], size: 64),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No surveys uploaded yet',
+                          style: GoogleFonts.poppins(
+                            fontSize: fontSizeSubtitle,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Tap the + button to upload your first building survey',
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            color: Colors.grey[500],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               }
               return ListView.builder(

@@ -21,7 +21,7 @@ import 'package:cmms/display%20screens/vendor_screen.dart';
 import 'package:cmms/display%20screens/kpi_screen.dart';
 import 'package:cmms/display%20screens/report_screen.dart';
 import 'package:cmms/screens/settings_screen.dart';
-import 'package:cmms/screens/user_screen.dart';
+//import 'package:cmms/screens/user_screen.dart';
 import 'package:cmms/developer/developer_screen.dart';
 
 class ResponsiveScreenWrapper extends StatefulWidget {
@@ -151,6 +151,47 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
     }
   }
 
+  void _handleDeveloperIconTap() async {
+    if (!_isDeveloper) {
+      _logger.w('App icon tapped but user is not a developer');
+      return;
+    }
+
+    _logger.i('App icon clicked on ${widget.title}, navigating to DeveloperScreen');
+    
+    try {
+      // Close drawer first if on mobile
+      final screenWidth = MediaQuery.of(context).size.width;
+      final isMobile = screenWidth <= 600;
+      
+      if (isMobile && _scaffoldKey.currentState?.isDrawerOpen == true) {
+        Navigator.pop(context); // Close drawer
+        _logger.i('Closed drawer before navigation on ${widget.title}');
+        // Add small delay to ensure drawer closes properly
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      // Navigate to developer screen
+      if (mounted) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const DeveloperScreen()),
+        );
+        _logger.i('Successfully navigated to DeveloperScreen from ${widget.title}');
+      }
+    } catch (e) {
+      _logger.e('Error navigating to DeveloperScreen: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error opening developer screen: $e', style: GoogleFonts.poppins()),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -223,26 +264,26 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
   Widget _buildAppIcon() {
     _logger.d('Building app icon for ${widget.title}, isDeveloper: $_isDeveloper');
-    return InkWell(
-      onTap: _isDeveloper
-          ? () {
-              _logger.i('App icon clicked on ${widget.title}, navigating to DeveloperScreen');
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const DeveloperScreen()),
-              );
-              if (MediaQuery.of(context).size.width <= 600) {
-                Navigator.pop(context); // Close drawer on mobile
-                _logger.i('Closed drawer after navigation on ${widget.title}');
-              }
-            }
-          : null,
+    
+    return GestureDetector(
+      onTap: _isDeveloper ? _handleDeveloperIconTap : null,
+      behavior: HitTestBehavior.opaque,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 20),
-        child: Image.asset(
-          'assets/icons/icon.png',
-          width: 60,
-          height: 60,
+        width: double.infinity,
+        child: Center(
+          child: Container(
+            decoration: _isDeveloper ? BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: Colors.blueGrey.withValues(alpha: 0.1),
+            ) : null,
+            padding: const EdgeInsets.all(8),
+            child: Image.asset(
+              'assets/icons/icon.png',
+              width: 60,
+              height: 60,
+            ),
+          ),
         ),
       ),
     );
@@ -382,7 +423,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       'Equipment Supplied': () => EquipmentSuppliedScreen(facilityId: widget.facilityId),
       'Inventory and Parts': () => InventoryScreen(facilityId: widget.facilityId),
       'Vendors': () => VendorScreen(facilityId: widget.facilityId),
-      'Users': () => UserScreen(facilityId: widget.facilityId),
+      //'Users': () => UserScreen(facilityId: widget.facilityId),
       'KPIs': () => KpiScreen(facilityId: widget.facilityId),
       'Report': () => ReportScreen(facilityId: widget.facilityId),
       'Settings': () => SettingsScreen(facilityId: widget.facilityId),

@@ -358,7 +358,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       final frequencyMonths = int.parse(_frequencyController.text);
       final createdAt = DateTime.now();
       final nextDue = createdAt.add(Duration(days: frequencyMonths * 30));
-      final notificationDate = DateTime(nextDue.year, nextDue.month, nextDue.day, 9, 0);
+      //final notificationDate = DateTime(nextDue.year, nextDue.month, nextDue.day, 9, 0);
 
       final task = MaintenanceTask(
         category: _categoryController.text,
@@ -375,14 +375,14 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         'facilityId': widget.facilityId,
       });
 
-      await _notificationService.scheduleNotification(
+      /*await _notificationService.scheduleNotification(
         category: task.category,
         component: task.component,
         intervention: task.intervention,
         notificationDate: notificationDate,
         facilityId: widget.facilityId,
         taskId: docRef.id,
-      );
+      );*/
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
