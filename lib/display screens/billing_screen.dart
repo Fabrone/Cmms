@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -59,6 +60,7 @@ class _BillingScreenState extends State<BillingScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
+        withData: kIsWeb,
       );
       if (result == null || result.files.isEmpty) {
         logger.w('No file selected');
@@ -66,9 +68,10 @@ class _BillingScreenState extends State<BillingScreen> {
         return;
       }
 
-      final file = File(result.files.single.path!);
-      final fileName = result.files.single.name;
+      final platformFile = result.files.single;
+      final fileName = platformFile.name;
       final user = FirebaseAuth.instance.currentUser;
+      
       if (user == null) {
         logger.w('No authenticated user for upload');
         if (mounted) _showSnackBar('Please sign in to upload billing documents');
@@ -82,7 +85,29 @@ class _BillingScreenState extends State<BillingScreen> {
         context: context,
         builder: (context) => AlertDialog(
           title: Text('Confirm Upload', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-          content: Text('Do you want to upload the billing document: $fileName?', style: GoogleFonts.poppins()),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (kIsWeb) 
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'WEB',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[800],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Text('Do you want to upload the billing document: $fileName?', style: GoogleFonts.poppins()),
+            ],
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -129,6 +154,16 @@ class _BillingScreenState extends State<BillingScreen> {
                       : 'Starting upload...',
                   style: GoogleFonts.poppins(),
                 ),
+                if (kIsWeb) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Web Upload',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.blue[600],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -138,7 +173,41 @@ class _BillingScreenState extends State<BillingScreen> {
       final storageRef = FirebaseStorage.instance
           .ref()
           .child('facilities/${widget.facilityId}/billing_data/${DateTime.now().millisecondsSinceEpoch}_$fileName');
-      final uploadTask = storageRef.putFile(file);
+
+      late UploadTask uploadTask;
+      
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        if (platformFile.bytes == null) {
+          throw 'File bytes not available for web/desktop upload';
+        }
+        
+        final metadata = SettableMetadata(
+          contentType: 'application/pdf',
+          customMetadata: {
+            'uploadedBy': user.uid,
+            'originalName': fileName,
+            'platform': kIsWeb ? 'web' : Platform.operatingSystem,
+          },
+        );
+        
+        uploadTask = storageRef.putData(platformFile.bytes!, metadata);
+      } else {
+        if (platformFile.path == null) {
+          throw 'File path not available for mobile upload';
+        }
+        
+        final file = File(platformFile.path!);
+        final metadata = SettableMetadata(
+          contentType: 'application/pdf',
+          customMetadata: {
+            'uploadedBy': user.uid,
+            'originalName': fileName,
+            'platform': Platform.operatingSystem,
+          },
+        );
+        
+        uploadTask = storageRef.putFile(file, metadata);
+      }
 
       uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
         if (mounted) {
@@ -162,6 +231,7 @@ class _BillingScreenState extends State<BillingScreen> {
         'facilityId': widget.facilityId,
         'status': 'pending',
         'approvalStatus': 'pending',
+        'platform': kIsWeb ? 'web' : Platform.operatingSystem,
       });
 
       if (mounted) {
@@ -187,6 +257,23 @@ class _BillingScreenState extends State<BillingScreen> {
   }
 
   Future<void> _viewDocument(String url, String fileName, String docId) async {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text('Loading document...', style: GoogleFonts.poppins()),
+          ],
+        ),
+      ),
+    );
+
     try {
       if (mounted) {
         setState(() {
@@ -196,7 +283,15 @@ class _BillingScreenState extends State<BillingScreen> {
       }
 
       logger.i('Viewing document: $fileName, url: $url');
-      if (Platform.isAndroid || Platform.isIOS) {
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        Navigator.pop(context);
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw 'Could not open billing document in browser';
+        }
+      } else if (Platform.isAndroid || Platform.isIOS) {
         if (fileName.toLowerCase().endsWith('.pdf')) {
           final tempDir = await getTemporaryDirectory();
           final filePath = '${tempDir.path}/$fileName';
@@ -204,6 +299,7 @@ class _BillingScreenState extends State<BillingScreen> {
           final file = File(filePath);
           if (await file.exists()) {
             if (mounted) {
+              Navigator.pop(context);
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -219,29 +315,54 @@ class _BillingScreenState extends State<BillingScreen> {
             throw 'Failed to download PDF';
           }
         } else {
+          Navigator.pop(context);
           throw 'Only PDF viewing supported on mobile';
-        }
-      } else {
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.inAppWebView);
-        } else {
-          throw 'Could not open billing document';
         }
       }
     } catch (e, stackTrace) {
       logger.e('Error viewing billing document: $e', stackTrace: stackTrace);
-      if (mounted) _showSnackBar('Error viewing billing document: $e');
+      if (mounted) {
+        Navigator.pop(context);
+        _showSnackBar('Error viewing billing document: $e');
+      }
     }
   }
 
   Future<void> _downloadDocument(String url, String fileName) async {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text('Downloading...', style: GoogleFonts.poppins()),
+          ],
+        ),
+      ),
+    );
+
     try {
       logger.i('Downloading document: $fileName, url: $url');
-      if (Platform.isAndroid || Platform.isIOS) {
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        Navigator.pop(context);
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw 'Could not download billing document';
+        }
+      } else if (Platform.isAndroid || Platform.isIOS) {
         bool permissionGranted = await _requestStoragePermission();
         if (!permissionGranted) {
-          if (mounted) _showSnackBar('Storage permission denied');
+          if (mounted) {
+            Navigator.pop(context);
+            _showSnackBar('Storage permission denied');
+          }
           return;
         }
 
@@ -252,23 +373,20 @@ class _BillingScreenState extends State<BillingScreen> {
         final file = File(filePath);
         if (await file.exists()) {
           if (mounted) {
+            Navigator.pop(context);
             _showSnackBar('Billing document downloaded to $filePath');
           }
           logger.i('Downloaded billing document: $fileName to $filePath');
         } else {
           throw 'Failed to download billing document';
         }
-      } else {
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        } else {
-          throw 'Could not download billing document';
-        }
       }
     } catch (e, stackTrace) {
       logger.e('Error downloading billing document: $e', stackTrace: stackTrace);
-      if (mounted) _showSnackBar('Error downloading billing document: $e');
+      if (mounted) {
+        Navigator.pop(context);
+        _showSnackBar('Error downloading billing document: $e');
+      }
     }
   }
 
@@ -396,13 +514,35 @@ class _BillingScreenState extends State<BillingScreen> {
         children: [
           if (_isAdmin && _showForm) _buildUploadForm(padding, fontSizeTitle, fontSizeSubtitle),
           const SizedBox(height: 24),
-          Text(
-            'Billing Documents',
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.bold,
-              fontSize: fontSizeTitle,
-              color: Colors.blueGrey[900],
-            ),
+          Row(
+            children: [
+              Text(
+                'Billing Documents',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold,
+                  fontSize: fontSizeTitle,
+                  color: Colors.blueGrey[900],
+                ),
+              ),
+              if (kIsWeb) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'WEB',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[800],
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 16),
           StreamBuilder<QuerySnapshot>(
@@ -423,9 +563,39 @@ class _BillingScreenState extends State<BillingScreen> {
               final docs = snapshot.data?.docs ?? [];
               if (docs.isEmpty) {
                 logger.w('No billing documents found for facilityId: ${widget.facilityId}');
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Text('No billing documents uploaded yet', style: GoogleFonts.poppins(fontSize: fontSizeSubtitle)),
+                return Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.receipt,
+                          size: 64,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No billing documents uploaded yet',
+                          style: GoogleFonts.poppins(
+                            fontSize: fontSizeSubtitle,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        if (_isAdmin) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Tap the upload button to add your first billing document',
+                            style: GoogleFonts.poppins(
+                              fontSize: fontSizeSubtitle - 2,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 );
               }
               logger.i('Found ${docs.length} billing documents');
@@ -456,13 +626,35 @@ class _BillingScreenState extends State<BillingScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Upload Billing Document',
-                    style: GoogleFonts.poppins(
-                      fontSize: fontSizeTitle,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey[900],
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        'Upload Billing Document',
+                        style: GoogleFonts.poppins(
+                          fontSize: fontSizeTitle,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blueGrey[900],
+                        ),
+                      ),
+                      if (kIsWeb) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[100],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'WEB',
+                            style: GoogleFonts.poppins(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue[800],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.blueGrey),

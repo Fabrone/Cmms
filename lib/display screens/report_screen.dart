@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/widgets/responsive_screen_wrapper.dart';
+import 'dart:async';
 
 class ReportScreen extends StatefulWidget {
   final String facilityId;
@@ -23,41 +24,100 @@ class _ReportScreenState extends State<ReportScreen> {
   DateTime? _startDate;
   DateTime? _endDate;
   bool _isGenerating = false;
+  bool _isLoading = false;
   Map<String, dynamic>? _lastGeneratedReport;
-  late Stream<QuerySnapshot> _dataStream;
+  StreamSubscription<QuerySnapshot>? _dataSubscription;
+  List<QueryDocumentSnapshot> _currentData = [];
+  String? _lastError;
 
   @override
   void initState() {
     super.initState();
     _logger.i('ReportScreen initialized: facilityId=${widget.facilityId}');
-    _initializeDataStream();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeDataStream();
+    });
+  }
+
+  @override
+  void dispose() {
+    _dataSubscription?.cancel();
+    super.dispose();
   }
 
   void _initializeDataStream() {
-    _dataStream = _getDataStream();
+    if (!mounted) return;
+    
+    setState(() {
+      _isLoading = true;
+      _lastError = null;
+    });
+
+    _dataSubscription?.cancel();
+    
+    try {
+      final stream = _getDataStream();
+      _dataSubscription = stream.listen(
+        (QuerySnapshot snapshot) {
+          if (mounted) {
+            setState(() {
+              _currentData = snapshot.docs;
+              _isLoading = false;
+              _lastError = null;
+            });
+            _generateDetailedReport(_currentData);
+          }
+        },
+        onError: (error) {
+          _logger.e('Stream error: $error');
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+              _lastError = error.toString();
+            });
+          }
+        },
+      );
+    } catch (e) {
+      _logger.e('Error initializing stream: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _lastError = e.toString();
+        });
+      }
+    }
   }
 
   Stream<QuerySnapshot> _getDataStream() {
     String collection = _getCollectionName();
-    Query query = FirebaseFirestore.instance
-        .collection('facilities')
-        .doc(widget.facilityId)
-        .collection(collection);
+    
+    // Use the correct subcollection path under facilities
+    Query query;
+    
+    if (_reportType == 'Vendors') {
+      // Vendors are at root level but need facilityId filter
+      query = FirebaseFirestore.instance
+          .collection('Vendors')
+          .where('facilityId', isEqualTo: widget.facilityId)
+          .limit(100);
+    } else {
+      // Other collections are under facilities subcollection
+      query = FirebaseFirestore.instance
+          .collection('facilities')
+          .doc(widget.facilityId)
+          .collection(collection)
+          .limit(100);
+    }
 
+    // Apply filters one at a time to avoid complex composite queries
     if (_statusFilter != 'All') {
       query = query.where('status', isEqualTo: _statusFilter);
     }
-    if (_priorityFilter != 'All' && (_reportType == 'Work Orders' || _reportType == 'Requests')) {
-      query = query.where('priority', isEqualTo: _priorityFilter);
-    }
-    if (_categoryFilter != 'All' && (_reportType == 'Equipment' || _reportType == 'Inventory' || _reportType == 'Vendors')) {
-      query = query.where('category', isEqualTo: _categoryFilter);
-    }
+
+    // For date filtering, use a simpler approach
     if (_startDate != null) {
       query = query.where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_startDate!));
-    }
-    if (_endDate != null) {
-      query = query.where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(_endDate!));
     }
 
     return query.orderBy('createdAt', descending: true).snapshots();
@@ -74,72 +134,74 @@ class _ReportScreenState extends State<ReportScreen> {
       case 'Inventory':
         return 'inventory';
       case 'Vendors':
-        return 'vendors';
+        return 'Vendors'; // This will be handled differently in _getDataStream
       default:
         return 'work_orders';
     }
   }
 
-  Future<Map<String, dynamic>> _generateDetailedReport(List<QueryDocumentSnapshot> docs) async {
-    if (!mounted) return {};
+  Future<void> _generateDetailedReport(List<QueryDocumentSnapshot> docs) async {
+    if (!mounted || _isGenerating) return;
 
     setState(() => _isGenerating = true);
 
     try {
+      await Future.delayed(const Duration(milliseconds: 100)); // Prevent UI blocking
+      
+      if (!mounted) return;
+
       _logger.i('Generating detailed report for ${docs.length} items');
 
-      final data = docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
-
-      Map<String, int> statusCounts = {};
-      Map<String, int> priorityCounts = {};
-      Map<String, int> categoryCounts = {};
-      Map<String, int> monthlyCounts = {};
-      double totalValue = 0;
-      int totalQuantity = 0;
-
-      for (var item in data) {
-        final status = item['status'] as String? ?? 'Unknown';
-        statusCounts[status] = (statusCounts[status] ?? 0) + 1;
-
-        if (item.containsKey('priority')) {
-          final priority = item['priority'] as String? ?? 'Unknown';
-          priorityCounts[priority] = (priorityCounts[priority] ?? 0) + 1;
-        }
-
-        if (item.containsKey('category')) {
-          final category = item['category'] as String? ?? 'Unknown';
-          categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
-        }
-
-        if (item.containsKey('createdAt')) {
-          final createdAt = (item['createdAt'] as Timestamp?)?.toDate();
-          if (createdAt != null) {
-            final monthKey = DateFormat('yyyy-MM').format(createdAt);
-            monthlyCounts[monthKey] = (monthlyCounts[monthKey] ?? 0) + 1;
+      // Process data in smaller chunks to prevent memory issues
+      final data = <Map<String, dynamic>>[];
+      for (int i = 0; i < docs.length; i += 10) {
+        final chunk = docs.skip(i).take(10);
+        for (final doc in chunk) {
+          try {
+            final docData = doc.data() as Map<String, dynamic>?;
+            if (docData != null) {
+              data.add(docData);
+            }
+          } catch (e) {
+            _logger.w('Error processing document ${doc.id}: $e');
           }
         }
-
-        if (item.containsKey('cost')) {
-          final cost = (item['cost'] as num?)?.toDouble() ?? 0;
-          final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
-          totalValue += cost * quantity;
-          totalQuantity += quantity;
+        
+        // Yield control back to UI thread
+        if (i % 20 == 0) {
+          await Future.delayed(const Duration(milliseconds: 1));
         }
       }
 
-      final sortedMonths = monthlyCounts.keys.toList()..sort();
-      double trend = 0;
-      if (sortedMonths.length >= 2) {
-        final recent = monthlyCounts[sortedMonths.last] ?? 0;
-        final previous = monthlyCounts[sortedMonths[sortedMonths.length - 2]] ?? 0;
-        trend = previous > 0 ? ((recent - previous) / previous * 100) : 0;
-      }
+      if (!mounted) return;
+
+      // Apply additional filtering in memory for better performance
+      final filteredData = data.where((item) {
+        if (_priorityFilter != 'All' && item['priority'] != _priorityFilter) {
+          return false;
+        }
+        if (_categoryFilter != 'All' && item['category'] != _categoryFilter) {
+          return false;
+        }
+        if (_endDate != null) {
+          final createdAt = (item['createdAt'] as Timestamp?)?.toDate();
+          if (createdAt != null && createdAt.isAfter(_endDate!)) {
+            return false;
+          }
+        }
+        return true;
+      }).toList();
+
+      // Generate statistics
+      final stats = await _generateStatistics(filteredData);
+      
+      if (!mounted) return;
 
       final report = {
         'reportType': _reportType,
         'facilityId': widget.facilityId,
         'generatedAt': DateTime.now().toIso8601String(),
-        'totalItems': docs.length,
+        'totalItems': filteredData.length,
         'filters': {
           'status': _statusFilter,
           'priority': _priorityFilter,
@@ -147,16 +209,8 @@ class _ReportScreenState extends State<ReportScreen> {
           'startDate': _startDate?.toIso8601String(),
           'endDate': _endDate?.toIso8601String(),
         },
-        'summary': {
-          'statusDistribution': statusCounts,
-          'priorityDistribution': priorityCounts,
-          'categoryDistribution': categoryCounts,
-          'monthlyDistribution': monthlyCounts,
-          'totalValue': totalValue,
-          'totalQuantity': totalQuantity,
-          'trend': trend,
-        },
-        'data': data,
+        'summary': stats,
+        'data': filteredData.take(50).toList(), // Limit displayed data
       };
 
       if (mounted) {
@@ -165,18 +219,89 @@ class _ReportScreenState extends State<ReportScreen> {
           _isGenerating = false;
         });
       }
-
-      return report;
     } catch (e, stackTrace) {
       _logger.e('Error generating report: $e', stackTrace: stackTrace);
       if (mounted) {
         setState(() => _isGenerating = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error generating report: $e', style: GoogleFonts.poppins())),
+          SnackBar(
+            content: Text('Error generating report: $e', style: GoogleFonts.poppins()),
+            duration: const Duration(seconds: 3),
+          ),
         );
       }
-      return {};
     }
+  }
+
+  Future<Map<String, dynamic>> _generateStatistics(List<Map<String, dynamic>> data) async {
+    final Map<String, int> statusCounts = {};
+    final Map<String, int> priorityCounts = {};
+    final Map<String, int> categoryCounts = {};
+    final Map<String, int> monthlyCounts = {};
+    double totalValue = 0;
+    int totalQuantity = 0;
+
+    for (final item in data) {
+      // Status distribution
+      final status = item['status'] as String? ?? 'Unknown';
+      statusCounts[status] = (statusCounts[status] ?? 0) + 1;
+
+      // Priority distribution
+      if (item.containsKey('priority')) {
+        final priority = item['priority'] as String? ?? 'Unknown';
+        priorityCounts[priority] = (priorityCounts[priority] ?? 0) + 1;
+      }
+
+      // Category distribution
+      if (item.containsKey('category')) {
+        final category = item['category'] as String? ?? 'Unknown';
+        categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+      }
+
+      // Monthly distribution
+      if (item.containsKey('createdAt')) {
+        try {
+          final createdAt = (item['createdAt'] as Timestamp?)?.toDate();
+          if (createdAt != null) {
+            final monthKey = DateFormat('yyyy-MM').format(createdAt);
+            monthlyCounts[monthKey] = (monthlyCounts[monthKey] ?? 0) + 1;
+          }
+        } catch (e) {
+          _logger.w('Error processing date for item: $e');
+        }
+      }
+
+      // Value calculations
+      if (item.containsKey('cost')) {
+        try {
+          final cost = (item['cost'] as num?)?.toDouble() ?? 0;
+          final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+          totalValue += cost * quantity;
+          totalQuantity += quantity;
+        } catch (e) {
+          _logger.w('Error processing cost for item: $e');
+        }
+      }
+    }
+
+    // Calculate trend
+    final sortedMonths = monthlyCounts.keys.toList()..sort();
+    double trend = 0;
+    if (sortedMonths.length >= 2) {
+      final recent = monthlyCounts[sortedMonths.last] ?? 0;
+      final previous = monthlyCounts[sortedMonths[sortedMonths.length - 2]] ?? 0;
+      trend = previous > 0 ? ((recent - previous) / previous * 100) : 0;
+    }
+
+    return {
+      'statusDistribution': statusCounts,
+      'priorityDistribution': priorityCounts,
+      'categoryDistribution': categoryCounts,
+      'monthlyDistribution': monthlyCounts,
+      'totalValue': totalValue,
+      'totalQuantity': totalQuantity,
+      'trend': trend,
+    };
   }
 
   List<String> _getAvailableFilters() {
@@ -216,8 +341,12 @@ class _ReportScreenState extends State<ReportScreen> {
       _categoryFilter = 'All';
       _startDate = null;
       _endDate = null;
-      _initializeDataStream();
     });
+    _initializeDataStream();
+  }
+
+  void _refreshData() {
+    _initializeDataStream();
   }
 
   @override
@@ -228,7 +357,7 @@ class _ReportScreenState extends State<ReportScreen> {
       currentRole: 'Engineer',
       organization: '-',
       floatingActionButton: FloatingActionButton(
-        onPressed: () => setState(() => _initializeDataStream()),
+        onPressed: _refreshData,
         backgroundColor: Colors.blueGrey[900],
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         child: const Icon(Icons.refresh, color: Colors.white),
@@ -245,15 +374,60 @@ class _ReportScreenState extends State<ReportScreen> {
     final fontSizeTitle = isMobile ? 16.0 : isTablet ? 20.0 : 24.0;
     final fontSize = isMobile ? 12.0 : isTablet ? 14.0 : 16.0;
 
+    if (_lastError != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, size: 64, color: Colors.red[400]),
+            const SizedBox(height: 16),
+            Text(
+              'Error loading data',
+              style: GoogleFonts.poppins(
+                fontSize: fontSizeTitle,
+                fontWeight: FontWeight.bold,
+                color: Colors.red[700],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _lastError!,
+              style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.grey[600]),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _refreshData,
+              icon: const Icon(Icons.refresh),
+              label: Text('Retry', style: GoogleFonts.poppins()),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueGrey[800],
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return SingleChildScrollView(
       padding: EdgeInsets.all(padding),
       child: Column(
         children: [
           _buildFilterSection(padding, fontSizeTitle: fontSizeTitle, fontSize: fontSize),
           const SizedBox(height: 12),
-          _buildSummaryStatsSection(padding: padding, fontSize: fontSize),
-          const SizedBox(height: 12),
-          _buildDataList(fontSize: fontSize, padding: padding),
+          if (_isLoading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(32.0),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else ...[
+            _buildSummaryStatsSection(padding: padding, fontSize: fontSize),
+            const SizedBox(height: 12),
+            _buildDataList(fontSize: fontSize, padding: padding),
+          ],
         ],
       ),
     );
@@ -301,28 +475,28 @@ class _ReportScreenState extends State<ReportScreen> {
                           _statusFilter = 'All';
                           _priorityFilter = 'All';
                           _categoryFilter = 'All';
-                          _initializeDataStream();
                         });
+                        _initializeDataStream();
                       }, fontSize),
                       _buildDropdown('Status', _statusFilter, _getAvailableFilters(), (value) {
                         setState(() {
                           _statusFilter = value!;
-                          _initializeDataStream();
                         });
+                        _initializeDataStream();
                       }, fontSize),
                       if (_reportType == 'Work Orders' || _reportType == 'Requests')
                         _buildDropdown('Priority', _priorityFilter, ['All', 'High', 'Medium', 'Low'], (value) {
                           setState(() {
                             _priorityFilter = value!;
-                            _initializeDataStream();
                           });
+                          _initializeDataStream();
                         }, fontSize),
                       if (_reportType == 'Equipment' || _reportType == 'Inventory' || _reportType == 'Vendors')
                         _buildDropdown('Category', _categoryFilter, _getAvailableCategories(), (value) {
                           setState(() {
                             _categoryFilter = value!;
-                            _initializeDataStream();
                           });
+                          _initializeDataStream();
                         }, fontSize),
                     ],
                   )
@@ -337,8 +511,8 @@ class _ReportScreenState extends State<ReportScreen> {
                                 _statusFilter = 'All';
                                 _priorityFilter = 'All';
                                 _categoryFilter = 'All';
-                                _initializeDataStream();
                               });
+                              _initializeDataStream();
                             }, fontSize),
                           ),
                           const SizedBox(width: 12),
@@ -346,8 +520,8 @@ class _ReportScreenState extends State<ReportScreen> {
                             child: _buildDropdown('Status', _statusFilter, _getAvailableFilters(), (value) {
                               setState(() {
                                 _statusFilter = value!;
-                                _initializeDataStream();
                               });
+                              _initializeDataStream();
                             }, fontSize),
                           ),
                         ],
@@ -360,8 +534,8 @@ class _ReportScreenState extends State<ReportScreen> {
                               child: _buildDropdown('Priority', _priorityFilter, ['All', 'High', 'Medium', 'Low'], (value) {
                                 setState(() {
                                   _priorityFilter = value!;
-                                  _initializeDataStream();
                                 });
+                                _initializeDataStream();
                               }, fontSize),
                             )
                           else
@@ -372,8 +546,8 @@ class _ReportScreenState extends State<ReportScreen> {
                               child: _buildDropdown('Category', _categoryFilter, _getAvailableCategories(), (value) {
                                 setState(() {
                                   _categoryFilter = value!;
-                                  _initializeDataStream();
                                 });
+                                _initializeDataStream();
                               }, fontSize),
                             )
                           else
@@ -453,8 +627,8 @@ class _ReportScreenState extends State<ReportScreen> {
                 );
               }
             }
-            _initializeDataStream();
           });
+          _initializeDataStream();
         }
       },
       icon: const Icon(Icons.calendar_today, size: 16, color: Colors.blueGrey),
@@ -473,39 +647,24 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 
   Widget _buildSummaryStatsSection({required double padding, required double fontSize}) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _dataStream,
-      builder: (context, snapshot) {
-        _logger.i('StreamBuilder snapshot: connectionState=${snapshot.connectionState}, hasError=${snapshot.hasError}, docCount=${snapshot.data?.docs.length ?? 0}');
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          _logger.e('Firestore error: ${snapshot.error}');
-          return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.red));
-        }
-
-        final docs = snapshot.data?.docs ?? [];
-        if (!_isGenerating && mounted) {
-          _generateDetailedReport(docs);
-        }
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildLiveIndicator(docs.length, fontSize: fontSize, padding: padding),
-            const SizedBox(height: 12),
-            if (_lastGeneratedReport != null) _buildSummarySection(_lastGeneratedReport!, fontSize: fontSize, padding: padding),
-          ],
-        );
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLiveIndicator(_currentData.length, fontSize: fontSize, padding: padding),
+        const SizedBox(height: 12),
+        if (_lastGeneratedReport != null) _buildSummarySection(_lastGeneratedReport!, fontSize: fontSize, padding: padding),
+      ],
     );
   }
 
   Widget _buildLiveIndicator(int itemCount, {required double fontSize, required double padding}) {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: padding, vertical: padding / 2),
-      color: Colors.green[50],
+      decoration: BoxDecoration(
+        color: Colors.green[50],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.green[200]!),
+      ),
       child: Row(
         children: [
           const Icon(Icons.circle, color: Colors.green, size: 12),
@@ -515,7 +674,8 @@ class _ReportScreenState extends State<ReportScreen> {
             style: GoogleFonts.poppins(
               fontSize: fontSize,
               color: Colors.green[700],
-              fontWeight: FontWeight.w500),
+              fontWeight: FontWeight.w500,
+            ),
           ),
           const Spacer(),
           if (_isGenerating)
@@ -573,8 +733,6 @@ class _ReportScreenState extends State<ReportScreen> {
                   _buildStatChip('Total Value', '\$${summary['totalValue'].toStringAsFixed(2)}', Colors.green, fontSize: fontSize),
                 if (summary['totalQuantity'] != null && summary['totalQuantity'] > 0)
                   _buildStatChip('Total Quantity', '${summary['totalQuantity']}', Colors.orange, fontSize: fontSize),
-                if (summary['totalQuantity'] != null && summary['totalQuantity'] > 0)
-                  _buildStatChip('Total Quantity', '${summary['totalQuantity']}', Colors.orange, fontSize: fontSize),
                 if (summary['trend'] != null)
                   _buildStatChip(
                     'Trend',
@@ -624,58 +782,55 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 
   Widget _buildDataList({required double fontSize, required double padding}) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _dataStream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          _logger.e('Firestore error: ${snapshot.error}');
-          return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.red));
-        }
+    if (_currentData.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.description_outlined,
+              size: 48,
+              color: Colors.grey[400],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'No data found for current filters',
+              style: GoogleFonts.poppins(
+                fontSize: fontSize,
+                color: Colors.grey[600],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
-        final docs = snapshot.data?.docs ?? [];
+    // Limit the number of items displayed to prevent performance issues
+    final displayData = _currentData.take(50).toList();
 
-        return docs.isEmpty
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.description_outlined,
-                      size: 48,
-                      color: Colors.grey[400],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'No data found for current filters',
-                      style: GoogleFonts.poppins(
-                        fontSize: fontSize,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            : ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: docs.length,
-                itemBuilder: (context, index) {
-                  final item = docs[index].data() as Map<String, dynamic>;
-                  return _buildDataCard(item, index, fontSize: fontSize, padding: padding);
-                },
-              );
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: displayData.length,
+      itemBuilder: (context, index) {
+        try {
+          final item = displayData[index].data() as Map<String, dynamic>?;
+          if (item == null) return const SizedBox.shrink();
+          
+          return _buildDataCard(item, index, fontSize: fontSize, padding: padding);
+        } catch (e) {
+          _logger.w('Error building item at index $index: $e');
+          return const SizedBox.shrink();
+        }
       },
     );
   }
 
   Widget _buildDataCard(Map<String, dynamic> item, int index, {required double fontSize, required double padding}) {
     return Card(
-      elevation: 4,
+      elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      margin: EdgeInsets.symmetric(vertical: padding / 2),
+      margin: EdgeInsets.symmetric(vertical: padding / 4),
       child: Padding(
         padding: EdgeInsets.all(padding),
         child: Row(
@@ -704,6 +859,8 @@ class _ReportScreenState extends State<ReportScreen> {
                       fontSize: fontSize,
                       color: Colors.blueGrey[900],
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
                   Text(
