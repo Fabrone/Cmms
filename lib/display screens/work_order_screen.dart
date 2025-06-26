@@ -36,6 +36,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> {
   bool _showForm = false;
   String _currentRole = 'User';
   String _organization = '-';
+  double? _uploadProgress;
 
   @override
   void initState() {
@@ -175,10 +176,11 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> {
 
   Future<void> _uploadAttachment() async {
     try {
-      _logger.i('Picking attachment file, platform: ${kIsWeb ? "web" : "non-web"}');
+      _logger.i('Picking attachment file, platform: ${kIsWeb ? "web" : Platform.operatingSystem}');
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'jpg', 'png', 'docx'],
+        withData: kIsWeb,
       );
       if (result == null || result.files.isEmpty) {
         _logger.w('No file selected');
@@ -186,42 +188,206 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> {
         return;
       }
 
-      final file = result.files.first;
-      _logger.i('Uploading attachment: ${file.name}, bytes: ${file.bytes != null}');
-      final fileName = '${const Uuid().v4()}_${file.name}';
+      final platformFile = result.files.single;
+      final fileName = platformFile.name;
+      final user = FirebaseAuth.instance.currentUser;
+      
+      if (user == null) {
+        if (mounted) {
+          _showSnackBar('Please sign in to upload attachments');
+        }
+        return;
+      }
+
+      if (!mounted) {
+        _logger.w('Widget not mounted, skipping confirmation dialog for $fileName');
+        return;
+      }
+
+      final bool? confirmUpload = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Confirm Upload', style: GoogleFonts.poppins()),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (kIsWeb)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'WEB',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[800],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Text(
+                'Do you want to upload the file: $fileName?',
+                style: GoogleFonts.poppins(),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel', style: GoogleFonts.poppins()),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text('Upload', style: GoogleFonts.poppins()),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmUpload != true) {
+        _logger.i('User cancelled attachment upload: $fileName');
+        return;
+      }
+
+      if (!mounted) {
+        _logger.w('Widget not mounted, skipping progress dialog for $fileName');
+        return;
+      }
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            title: Text('Uploading $fileName', style: GoogleFonts.poppins()),
+            content: StatefulBuilder(
+              builder: (context, setDialogState) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    LinearProgressIndicator(
+                      value: _uploadProgress,
+                      backgroundColor: Colors.grey[300],
+                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.blueGrey),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _uploadProgress != null
+                          ? '${(_uploadProgress! * 100).toStringAsFixed(0)}%'
+                          : 'Starting upload...',
+                      style: GoogleFonts.poppins(),
+                    ),
+                    if (kIsWeb) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Web Upload',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: Colors.blue[600],
+                        ),
+                      ),
+                    ],
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      );
+
       final storageRef = FirebaseStorage.instance
           .ref()
-          .child('work_orders/${widget.facilityId}/$fileName');
+          .child('work_orders/${widget.facilityId}/${const Uuid().v4()}_$fileName');
 
-      String url;
-      if (kIsWeb) {
-        if (file.bytes == null) {
-          _logger.e('No bytes available for web upload');
-          if (mounted) _showSnackBar('File data unavailable');
-          return;
+      late UploadTask uploadTask;
+      
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        if (platformFile.bytes == null) {
+          throw 'File bytes not available for web/desktop upload';
         }
-        final uploadTask = await storageRef.putData(file.bytes!);
-        url = await uploadTask.ref.getDownloadURL();
+        
+        final metadata = SettableMetadata(
+          contentType: _getContentType(fileName),
+          customMetadata: {
+            'uploadedBy': user.uid,
+            'originalName': fileName,
+            'platform': kIsWeb ? 'web' : Platform.operatingSystem,
+          },
+        );
+        
+        uploadTask = storageRef.putData(platformFile.bytes!, metadata);
       } else {
-        if (file.path == null) {
-          _logger.e('No path available for non-web upload');
-          if (mounted) _showSnackBar('File path unavailable');
-          return;
+        if (platformFile.path == null) {
+          throw 'File path not available for mobile upload';
         }
-        final uploadTask = await storageRef.putFile(File(file.path!));
-        url = await uploadTask.ref.getDownloadURL();
+        
+        final file = File(platformFile.path!);
+        final metadata = SettableMetadata(
+          contentType: _getContentType(fileName),
+          customMetadata: {
+            'uploadedBy': user.uid,
+            'originalName': fileName,
+            'platform': Platform.operatingSystem,
+          },
+        );
+        
+        uploadTask = storageRef.putFile(file, metadata);
       }
 
-      _logger.i('Attachment uploaded successfully: $url');
+      uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
+        if (mounted) {
+          setState(() {
+            _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
+          });
+        }
+      }, onError: (e) {
+        _logger.e('Upload progress error: $e');
+      });
+
+      await uploadTask;
+      final url = await storageRef.getDownloadURL();
+
       if (mounted) {
         setState(() {
-          _attachmentUrls.add({'name': file.name, 'url': url});
+          _attachmentUrls.add({'name': fileName, 'url': url});
         });
-        _showSnackBar('Attachment uploaded');
+        Navigator.pop(context);
+        _showSnackBar('Attachment uploaded successfully');
       }
+      _logger.i('Attachment uploaded: $fileName, URL: $url, facilityId: ${widget.facilityId}');
     } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        _showSnackBar('Error uploading attachment: $e');
+      }
       _logger.e('Error uploading attachment: $e');
-      if (mounted) _showSnackBar('Error uploading attachment: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _uploadProgress = null;
+        });
+      }
+    }
+  }
+
+  String _getContentType(String fileName) {
+    final extension = fileName.toLowerCase().split('.').last;
+    switch (extension) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      default:
+        return 'application/octet-stream';
     }
   }
 

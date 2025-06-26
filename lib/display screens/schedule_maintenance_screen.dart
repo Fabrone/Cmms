@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -116,12 +117,14 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'doc', 'docx', 'pptx', 'txt'],
+        withData: kIsWeb,
       );
       if (result == null || result.files.isEmpty) return;
 
-      final file = File(result.files.single.path!);
-      final fileName = result.files.single.name;
+      final platformFile = result.files.single;
+      final fileName = platformFile.name;
       final user = FirebaseAuth.instance.currentUser;
+      
       if (user == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -131,14 +134,40 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         return;
       }
 
-      if (!mounted) return;
+      if (!mounted) {
+        logger.w('Widget not mounted, skipping confirmation dialog for $fileName');
+        return;
+      }
+
       final bool? confirmUpload = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: Text('Confirm Upload', style: GoogleFonts.poppins()),
-          content: Text(
-            'Do you want to upload the file: $fileName?',
-            style: GoogleFonts.poppins(),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (kIsWeb)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'WEB',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[800],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Text(
+                'Do you want to upload the file: $fileName?',
+                style: GoogleFonts.poppins(),
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -162,6 +191,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         logger.w('Widget not mounted, skipping progress dialog for $fileName');
         return;
       }
+
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -186,6 +216,16 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                           : 'Starting upload...',
                       style: GoogleFonts.poppins(),
                     ),
+                    if (kIsWeb) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Web Upload',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: Colors.blue[600],
+                        ),
+                      ),
+                    ],
                   ],
                 );
               },
@@ -197,7 +237,41 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       final storageRef = FirebaseStorage.instance
           .ref()
           .child('documents/${user.uid}/${DateTime.now().millisecondsSinceEpoch}_$fileName');
-      final uploadTask = storageRef.putFile(file);
+
+      late UploadTask uploadTask;
+      
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        if (platformFile.bytes == null) {
+          throw 'File bytes not available for web/desktop upload';
+        }
+        
+        final metadata = SettableMetadata(
+          contentType: _getContentType(fileName),
+          customMetadata: {
+            'uploadedBy': user.uid,
+            'originalName': fileName,
+            'platform': kIsWeb ? 'web' : Platform.operatingSystem,
+          },
+        );
+        
+        uploadTask = storageRef.putData(platformFile.bytes!, metadata);
+      } else {
+        if (platformFile.path == null) {
+          throw 'File path not available for mobile upload';
+        }
+        
+        final file = File(platformFile.path!);
+        final metadata = SettableMetadata(
+          contentType: _getContentType(fileName),
+          customMetadata: {
+            'uploadedBy': user.uid,
+            'originalName': fileName,
+            'platform': Platform.operatingSystem,
+          },
+        );
+        
+        uploadTask = storageRef.putFile(file, metadata);
+      }
 
       uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
         if (mounted) {
@@ -218,6 +292,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         'downloadUrl': downloadUrl,
         'uploadedAt': FieldValue.serverTimestamp(),
         'facilityId': widget.facilityId,
+        'platform': kIsWeb ? 'web' : Platform.operatingSystem,
       });
 
       if (mounted) {
@@ -244,35 +319,78 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     }
   }
 
+  String _getContentType(String fileName) {
+    final extension = fileName.toLowerCase().split('.').last;
+    switch (extension) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'doc':
+        return 'application/msword';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'pptx':
+        return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      case 'txt':
+        return 'text/plain';
+      default:
+        return 'application/octet-stream';
+    }
+  }
+
   Future<void> _viewDocument(String url, String fileName) async {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text('Loading document...', style: GoogleFonts.poppins()),
+          ],
+        ),
+      ),
+    );
+
     try {
-      if (fileName.toLowerCase().endsWith('.pdf')) {
-        final tempDir = await getTemporaryDirectory();
-        final filePath = '${tempDir.path}/$fileName';
-        await Dio().download(url, filePath);
-        final file = File(filePath);
-        if (await file.exists()) {
-          if (mounted) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => PDFViewerScreen(filePath: filePath, fileName: fileName),
-              ),
-            );
-          }
-        } else {
-          throw 'Failed to download PDF';
-        }
-      } else {
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        Navigator.pop(context);
         final uri = Uri.parse(url);
         if (await canLaunchUrl(uri)) {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
         } else {
-          throw 'Could not open document';
+          throw 'Could not open document in browser';
+        }
+      } else if (Platform.isAndroid || Platform.isIOS) {
+        if (fileName.toLowerCase().endsWith('.pdf')) {
+          final tempDir = await getTemporaryDirectory();
+          final filePath = '${tempDir.path}/$fileName';
+          await Dio().download(url, filePath);
+          final file = File(filePath);
+          if (await file.exists()) {
+            if (mounted) {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => PDFViewerScreen(filePath: filePath, fileName: fileName),
+                ),
+              );
+            }
+          } else {
+            throw 'Failed to download PDF';
+          }
+        } else {
+          Navigator.pop(context);
+          throw 'Only PDF viewing is supported on mobile';
         }
       }
     } catch (e) {
       if (mounted) {
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error viewing document: $e', style: GoogleFonts.poppins())),
         );
@@ -282,40 +400,70 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
   }
 
   Future<void> _downloadDocument(String url, String fileName) async {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text('Downloading...', style: GoogleFonts.poppins()),
+          ],
+        ),
+      ),
+    );
+
     try {
-      bool permissionGranted = await _requestStoragePermission();
-      if (!permissionGranted) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Storage permission denied', style: GoogleFonts.poppins())),
-          );
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        Navigator.pop(context);
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw 'Could not download document';
         }
-        return;
-      }
+      } else if (Platform.isAndroid || Platform.isIOS) {
+        bool permissionGranted = await _requestStoragePermission();
+        if (!permissionGranted) {
+          if (mounted) {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Storage permission denied', style: GoogleFonts.poppins())),
+            );
+          }
+          return;
+        }
 
-      final downloadsDir = await getExternalStorageDirectory();
-      final filePath = '${downloadsDir!.path}/$fileName';
-      await Dio().download(url, filePath);
+        final downloadsDir = await getExternalStorageDirectory();
+        final filePath = '${downloadsDir!.path}/$fileName';
+        await Dio().download(url, filePath);
 
-      final file = File(filePath);
-      if (await file.exists()) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Document downloaded to $filePath', style: GoogleFonts.poppins()),
-              action: SnackBarAction(
-                label: 'Open',
-                onPressed: () => OpenFile.open(filePath),
+        final file = File(filePath);
+        if (await file.exists()) {
+          if (mounted) {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Document downloaded to $filePath', style: GoogleFonts.poppins()),
+                action: SnackBarAction(
+                  label: 'Open',
+                  onPressed: () => OpenFile.open(filePath),
+                ),
               ),
-            ),
-          );
+            );
+          }
+          logger.i('Downloaded document: $fileName to $filePath');
+        } else {
+          throw 'Failed to download document';
         }
-        logger.i('Downloaded document: $fileName to $filePath');
-      } else {
-        throw 'Failed to download document';
       }
     } catch (e) {
       if (mounted) {
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error downloading document: $e', style: GoogleFonts.poppins())),
         );
@@ -358,7 +506,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       final frequencyMonths = int.parse(_frequencyController.text);
       final createdAt = DateTime.now();
       final nextDue = createdAt.add(Duration(days: frequencyMonths * 30));
-      //final notificationDate = DateTime(nextDue.year, nextDue.month, nextDue.day, 9, 0);
 
       final task = MaintenanceTask(
         category: _categoryController.text,
@@ -374,15 +521,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         'nextDue': Timestamp.fromDate(nextDue),
         'facilityId': widget.facilityId,
       });
-
-      /*await _notificationService.scheduleNotification(
-        category: task.category,
-        component: task.component,
-        intervention: task.intervention,
-        notificationDate: notificationDate,
-        facilityId: widget.facilityId,
-        taskId: docRef.id,
-      );*/
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
