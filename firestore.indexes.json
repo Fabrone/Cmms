@@ -527,6 +527,156 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "Schedule_Maintenance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "uploadedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "Schedule_Maintenance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "uploadedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "Schedule_Maintenance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "uploadedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "Schedule_Maintenance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "uploadedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "Schedule_Maintenance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "uploadedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "Schedule_Maintenance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "uploadedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "Schedule_Maintenance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "uploadedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "Schedule_Maintenance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "createdBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "Schedule_Maintenance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

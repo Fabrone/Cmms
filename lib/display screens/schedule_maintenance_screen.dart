@@ -124,7 +124,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       final platformFile = result.files.single;
       final fileName = platformFile.name;
       final user = FirebaseAuth.instance.currentUser;
-      
+
       if (user == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -236,15 +236,15 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
 
       final storageRef = FirebaseStorage.instance
           .ref()
-          .child('documents/${user.uid}/${DateTime.now().millisecondsSinceEpoch}_$fileName');
+          .child('facilities/${widget.facilityId}/schedule_maintenance/${DateTime.now().millisecondsSinceEpoch}_$fileName');
 
       late UploadTask uploadTask;
-      
+
       if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
         if (platformFile.bytes == null) {
           throw 'File bytes not available for web/desktop upload';
         }
-        
+
         final metadata = SettableMetadata(
           contentType: _getContentType(fileName),
           customMetadata: {
@@ -253,13 +253,13 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
             'platform': kIsWeb ? 'web' : Platform.operatingSystem,
           },
         );
-        
+
         uploadTask = storageRef.putData(platformFile.bytes!, metadata);
       } else {
         if (platformFile.path == null) {
           throw 'File path not available for mobile upload';
         }
-        
+
         final file = File(platformFile.path!);
         final metadata = SettableMetadata(
           contentType: _getContentType(fileName),
@@ -269,7 +269,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
             'platform': Platform.operatingSystem,
           },
         );
-        
+
         uploadTask = storageRef.putFile(file, metadata);
       }
 
@@ -286,13 +286,15 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       await uploadTask;
       final downloadUrl = await storageRef.getDownloadURL();
 
-      await FirebaseFirestore.instance.collection('documents').add({
-        'userId': user.uid,
+      // Ensure userId field is included for proper permissions
+      await FirebaseFirestore.instance.collection('Schedule_Maintenance').add({
+        'userId': user.uid, 
         'fileName': fileName,
         'downloadUrl': downloadUrl,
         'uploadedAt': FieldValue.serverTimestamp(),
         'facilityId': widget.facilityId,
         'platform': kIsWeb ? 'web' : Platform.operatingSystem,
+        'type': 'document',
       });
 
       if (mounted) {
@@ -339,7 +341,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
 
   Future<void> _viewDocument(String url, String fileName) async {
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -401,7 +403,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
 
   Future<void> _downloadDocument(String url, String fileName) async {
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -516,10 +518,12 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         createdAt: createdAt,
       );
 
-      final docRef = await FirebaseFirestore.instance.collection('maintenance_tasks').add({
+      await FirebaseFirestore.instance.collection('Schedule_Maintenance').add({
         ...task.toJson(),
+        'userId': user.uid, 
         'nextDue': Timestamp.fromDate(nextDue),
         'facilityId': widget.facilityId,
+        'type': 'task',
       });
 
       if (mounted) {
@@ -527,7 +531,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
           SnackBar(content: Text('Task saved successfully', style: GoogleFonts.poppins())),
         );
       }
-      logger.i('Saved task: ${task.toJson()}, ID: ${docRef.id}, facilityId: ${widget.facilityId}');
+      logger.i('Saved task: ${task.toJson()}, facilityId: ${widget.facilityId}');
 
       _categoryController.clear();
       _componentController.clear();
@@ -687,8 +691,9 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                   const SizedBox(height: 16),
                   StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
-                        .collection('documents')
+                        .collection('Schedule_Maintenance')
                         .where('facilityId', isEqualTo: widget.facilityId)
+                        .where('type', isEqualTo: 'document')
                         .orderBy('uploadedAt', descending: true)
                         .snapshots(),
                     builder: (context, snapshot) {
