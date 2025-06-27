@@ -54,7 +54,7 @@ class DashboardScreenState extends State<DashboardScreen> {
       return;
     }
 
-    logger.i('Checking roles for user: ${user.uid}');
+    logger.i('Checking roles and organization for user: ${user.uid}');
     for (var subscription in _roleSubscriptions) {
       subscription.cancel();
     }
@@ -65,7 +65,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     _setupRoleListener('Technicians', user.uid);
     _setupRoleListener('Users', user.uid);
 
-    await _updateUserRole(user.uid);
+    await _updateUserRoleAndOrganization(user.uid);
   }
 
   void _setupRoleListener(String collection, String uid) {
@@ -76,7 +76,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     final subscription = stream.listen(
       (snapshot) {
         logger.i('Role update detected in $collection for $uid');
-        _updateUserRole(uid);
+        _updateUserRoleAndOrganization(uid);
       },
       onError: (error) {
         logger.e('Error in $collection listener: $error');
@@ -85,7 +85,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     _roleSubscriptions.add(subscription);
   }
 
-  Future<void> _updateUserRole(String uid) async {
+  Future<void> _updateUserRoleAndOrganization(String uid) async {
     try {
       final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(uid).get();
       final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(uid).get();
@@ -99,23 +99,39 @@ class DashboardScreenState extends State<DashboardScreen> {
 
       if (adminDoc.exists) {
         newRole = 'Admin';
-        final adminData = adminDoc.data();
-        newOrg = adminData?['organization'] ?? '-';
+        newOrg = adminDoc.data()?['organization'] ?? '-';
       } else if (developerDoc.exists) {
-        newRole = 'Technician';
+        newRole = 'Developer';
         newOrg = 'JV Almacis';
       } else if (technicianDoc.exists) {
         newRole = 'Technician';
-        final techData = technicianDoc.data();
-        newOrg = techData?['organization'] ?? '-';
+        newOrg = technicianDoc.data()?['organization'] ?? '-';
       } else if (userDoc.exists) {
         final userData = userDoc.data();
-        if (userData != null && userData['role'] == 'Technician') {
-          newRole = 'Technician';
-          newOrg = '-';
-        } else {
-          newRole = 'User';
-          newOrg = '-';
+        newRole = userData?['role'] ?? 'User';
+        newOrg = userData?['organization'] ?? '-';
+      }
+
+      // Update Users collection if organization or role is missing or incorrect
+      if (userDoc.exists) {
+        final userData = userDoc.data() as Map<String, dynamic>;
+        if (userData['organization'] == null || userData['organization'] != newOrg || userData['role'] != newRole) {
+          try {
+            await FirebaseFirestore.instance.collection('Users').doc(uid).set({
+              'id': uid,
+              'username': userData['username'] ?? '',
+              'email': userData['email'] ?? '',
+              'createdAt': userData['createdAt'] ?? Timestamp.now(),
+              'role': newRole,
+              'organization': newOrg,
+            }, SetOptions(merge: true)).then((_) {
+              logger.i('Updated Users collection for $uid: role=$newRole, organization=$newOrg');
+            }).catchError((e) {
+              logger.e('Failed to update Users collection for $uid: $e');
+            });
+          } catch (e) {
+            logger.e('Error updating Users collection for $uid: $e');
+          }
         }
       }
 
@@ -136,7 +152,7 @@ class DashboardScreenState extends State<DashboardScreen> {
         );
       }
     } catch (e) {
-      logger.e('Error updating user role: $e');
+      logger.e('Error updating user role and organization: $e');
       if (mounted) {
         setState(() {
           _currentRole = 'User';

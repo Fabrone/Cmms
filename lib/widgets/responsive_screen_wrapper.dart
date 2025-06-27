@@ -21,7 +21,6 @@ import 'package:cmms/display%20screens/vendor_screen.dart';
 import 'package:cmms/display%20screens/kpi_screen.dart';
 import 'package:cmms/display%20screens/report_screen.dart';
 import 'package:cmms/screens/settings_screen.dart';
-//import 'package:cmms/screens/user_screen.dart';
 import 'package:cmms/developer/developer_screen.dart';
 
 class ResponsiveScreenWrapper extends StatefulWidget {
@@ -131,15 +130,9 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           _logger.i('User is Technician, org: $newOrg');
         } else if (userDoc.exists) {
           final userData = userDoc.data();
-          if (userData != null && userData['role'] == 'Technician') {
-            newRole = 'Technician';
-            newOrg = '-';
-            _logger.i('User is Technician (via Users collection)');
-          } else {
-            newRole = 'User';
-            newOrg = '-';
-            _logger.i('User is standard User');
-          }
+          newRole = userData?['role'] ?? 'User';
+          newOrg = userData?['organization'] ?? '-';
+          _logger.i('User is ${userData?['role'] ?? 'User'}, org: $newOrg');
         }
 
         if (mounted) {

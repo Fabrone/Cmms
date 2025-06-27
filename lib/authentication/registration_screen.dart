@@ -51,10 +51,16 @@ class RegistrationScreenState extends State<RegistrationScreen> {
         email: _emailController.text.trim(),
         createdAt: DateTime.now(),
         role: '-',
+        organization: '-',
       );
 
-      // Save to Firestore
-      await _firestore.collection('Users').doc(userModel.id).set(userModel.toMap());
+      // Save to Firestore with detailed logging
+      await _firestore.collection('Users').doc(userModel.id).set(userModel.toMap()).then((_) {
+        _logger.i('Successfully created user ${userModel.id} with fields: ${userModel.toMap()}');
+      }).catchError((e) {
+        _logger.e('Failed to create user in Firestore: $e');
+        throw e;
+      });
 
       if (!mounted) return;
 
@@ -86,6 +92,8 @@ class RegistrationScreenState extends State<RegistrationScreen> {
             errorMessage = 'The password is too weak.';
             break;
         }
+      } else if (e is FirebaseException) {
+        errorMessage = 'Firestore error: ${e.message}';
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
