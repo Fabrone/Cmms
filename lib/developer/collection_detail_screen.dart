@@ -38,6 +38,7 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
             const SnackBar(content: Text('User not found')),
           );
         }
+        logger.e('User $uid not found in Users collection');
         return;
       }
 
@@ -48,6 +49,7 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
             SnackBar(content: Text('User already has a role: ${userData['role']}')),
           );
         }
+        logger.w('User $uid already has role: ${userData['role']}');
         return;
       }
 
@@ -58,49 +60,85 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
             const SnackBar(content: Text('Role already assigned')),
           );
         }
+        logger.w('Role already assigned for user $uid in $collection');
         return;
       }
 
-      if (collection == 'Admins' && _selectedOrganization == null) {
+      String organization = '-';
+      
+      // Determine organization based on collection and current user
+      if (collection == 'Technicians') {
+        final currentUser = _auth.currentUser;
+        if (currentUser != null) {
+          final adminDoc = await _firestore.collection('Admins').doc(currentUser.uid).get();
+          if (adminDoc.exists) {
+            organization = adminDoc.data()!['organization'] ?? '-';
+            logger.i('Inherited organization for Technician: $organization');
+          } else {
+            // If assigning user is not an admin, check if they're a developer
+            final developerDoc = await _firestore.collection('Developers').doc(currentUser.uid).get();
+            if (developerDoc.exists) {
+              // For developers, use selected organization or default
+              organization = _selectedOrganization ?? 'JV Almacis';
+              logger.i('Developer assigned organization for Technician: $organization');
+            } else {
+              logger.w('Current user ${currentUser.uid} is neither Admin nor Developer');
+              organization = _selectedOrganization ?? '-';
+            }
+          }
+        } else {
+          logger.w('No current user logged in for Technician role assignment');
+          organization = _selectedOrganization ?? '-';
+        }
+      } else if (collection == 'Developers') {
+        organization = 'JV Almacis';
+        logger.i('Set organization for Developer: $organization');
+      } else if (collection == 'Admins') {
+        organization = _selectedOrganization ?? '-';
+        logger.i('Set organization for Admin: $organization');
+      }
+
+      // Validate organization for Admins and Technicians
+      if ((collection == 'Admins' || collection == 'Technicians') && organization == '-') {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Please select an organization')),
           );
         }
+        logger.w('No organization selected for $collection role assignment');
         return;
       }
 
       final roleData = {
         'username': userData['username'] ?? '',
         'email': userData['email'] ?? '',
-        'organization': collection == 'Admins' ? _selectedOrganization : null,
+        'organization': organization,
         'createdAt': Timestamp.now(),
         'isDisabled': false,
       };
 
-      // Write to role collection
-      await _firestore.collection(collection).doc(uid).set(roleData);
-      logger.i('Successfully added user $uid to $collection collection');
+      // Use batch write to ensure both operations succeed or fail together
+      final batch = _firestore.batch();
+      
+      // Add to role collection
+      batch.set(_firestore.collection(collection).doc(uid), roleData);
+      
+      // Update Users collection
+      batch.set(_firestore.collection('Users').doc(uid), {
+        'id': uid,
+        'username': userData['username'] ?? '',
+        'email': userData['email'] ?? '',
+        'createdAt': userData['createdAt'] ?? Timestamp.now(),
+        'role': role,
+        'organization': organization,
+      }, SetOptions(merge: true));
 
-      // Update Users collection with role
-      try {
-        await _firestore.collection('Users').doc(uid).update({'role': role});
-        logger.i('Successfully updated role to $role for user $uid in Users collection');
-      } catch (e) {
-        logger.e('Failed to update role in Users collection: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('$role role assigned to $collection, but failed to update user role: $e'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-        return;
-      }
+      await batch.commit();
+      
+      logger.i('Successfully assigned $role role to user $uid with organization: $organization');
 
-      // Log the activity
-      await _logActivity('Assigned $role role to $uid (User: ${userData['username']}, Organization: ${_selectedOrganization ?? '-'})');
+      await _logActivity('Assigned $role role to $uid (User: ${userData['username']}, Organization: $organization)');
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$role role assigned successfully!')),
@@ -116,12 +154,12 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
     }
   }
 
-  Future<void> _removeAdmin(String uid, String username) async {
+  Future<void> _removeUser(String uid, String username, String collection) async {
     bool? confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Confirm Removal'),
-        content: Text('Are you sure you want to remove $username from Admins?'),
+        content: Text('Are you sure you want to remove $username from $collection?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -138,199 +176,191 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
     if (confirm != true) return;
 
     try {
-      // Delete from Admins collection
-      await _firestore.collection('Admins').doc(uid).delete();
-      logger.i('Successfully removed user $uid from Admins collection');
-
-      // Update Users collection to remove role
-      try {
-        await _firestore.collection('Users').doc(uid).update({'role': '-'});
-        logger.i('Successfully reset role for user $uid in Users collection');
-      } catch (e) {
-        logger.e('Failed to reset role in Users collection: $e');
+      if (collection == 'Developers' && (await _firestore.collection('Developers').doc(uid).get()).data()?['email'] == 'lubangafabron@gmail.com') {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Admin removed, but failed to update user role: $e'),
-              backgroundColor: Colors.orange,
-            ),
+            const SnackBar(content: Text('This is the creator, you can\'t remove him from this role')),
           );
         }
         return;
       }
 
-      // Log the activity
-      await _logActivity('Removed Admin role from $uid (User: $username)');
+      // Use batch write for consistency
+      final batch = _firestore.batch();
+      
+      // Remove from role collection
+      batch.delete(_firestore.collection(collection).doc(uid));
+      
+      // Update Users collection (except for admin_logs)
+      if (collection != 'admin_logs') {
+        batch.set(_firestore.collection('Users').doc(uid), {
+          'role': '-',
+          'organization': '-',
+        }, SetOptions(merge: true));
+      }
+
+      await batch.commit();
+      
+      logger.i('Successfully removed user $uid from $collection collection');
+
+      await _logActivity('Removed $collection entry for $uid (User: $username)');
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Admin removed successfully!')),
+          SnackBar(content: Text('$collection entry removed successfully!')),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error removing admin: $e')),
+          SnackBar(content: Text('Error removing $collection entry: $e')),
         );
       }
-      logger.e('Error removing admin: $e');
+      logger.e('Error removing $collection entry: $e');
     }
   }
 
-  Future<void> _removeDeveloper(String uid, String username, String email) async {
-    if (email == 'lubangafabron@gmail.com') {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('This is the creator, you can’t remove him from this role')),
-        );
-      }
-      return;
-    }
-
-    bool? confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirm Removal'),
-        content: Text('Are you sure you want to remove $username from Developers?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    try {
-      // Delete from Developers collection
-      await _firestore.collection('Developers').doc(uid).delete();
-      logger.i('Successfully removed user $uid from Developers collection');
-
-      // Update Users collection to remove role
-      try {
-        await _firestore.collection('Users').doc(uid).update({'role': '-'});
-        logger.i('Successfully reset role for user $uid in Users collection');
-      } catch (e) {
-        logger.e('Failed to reset role in Users collection: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Developer removed, but failed to update user role: $e'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-        return;
-      }
-
-      // Log the activity
-      await _logActivity('Removed Developer role from $uid (User: $username)');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Developer removed successfully!')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error removing developer: $e')),
-        );
-      }
-      logger.e('Error removing developer: $e');
-    }
-  }
-
-  Future<void> _editAdmin(String uid, Map<String, dynamic> currentData) async {
+  Future<void> _editUser(String uid, Map<String, dynamic> currentData, String collection) async {
     _usernameController.text = currentData['username'] ?? '';
     _emailController.text = currentData['email'] ?? '';
-    _selectedOrganization = currentData['organization'];
+    
+    // Fix: Handle organization value that might not be in dropdown options
+    String currentOrg = currentData['organization'] ?? '-';
+    List<String> orgOptions = ['Embassy', 'JV Almacis'];
+    
+    // If current organization is not in the options and it's not '-', add it temporarily
+    // or set to null to show no selection
+    if (currentOrg == '-' || !orgOptions.contains(currentOrg)) {
+      _selectedOrganization = null; // This will show the hint text
+    } else {
+      _selectedOrganization = currentOrg;
+    }
 
     bool? confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Admin', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _usernameController,
-                decoration: InputDecoration(
-                  labelText: 'Username',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Edit $collection Entry', style: const TextStyle(fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: _usernameController,
+                  decoration: InputDecoration(
+                    labelText: 'Username',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _emailController,
-                decoration: InputDecoration(
-                  labelText: 'Email',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _emailController,
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _selectedOrganization,
-                decoration: InputDecoration(
-                  labelText: 'Organization',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                items: ['Embassy', 'JV Almacis'].map((String org) {
-                  return DropdownMenuItem<String>(
-                    value: org,
-                    child: Text(org),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  _selectedOrganization = value;
-                },
-              ),
-            ],
+                if (collection != 'Developers') ...[
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: _selectedOrganization,
+                    decoration: InputDecoration(
+                      labelText: 'Organization',
+                      hintText: currentOrg == '-' ? 'Select Organization' : 'Current: $currentOrg',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    items: orgOptions.map((String org) {
+                      return DropdownMenuItem<String>(
+                        value: org,
+                        child: Text(org),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setDialogState(() {
+                        _selectedOrganization = value;
+                      });
+                    },
+                    validator: (value) {
+                      if (collection == 'Admins' || collection == 'Technicians') {
+                        return value == null ? 'Please select an organization' : null;
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Save'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Save'),
-          ),
-        ],
       ),
     );
 
     if (confirm != true) return;
 
     try {
+      // Validate organization selection for required collections
+      if ((collection == 'Admins' || collection == 'Technicians') && _selectedOrganization == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please select an organization')),
+          );
+        }
+        return;
+      }
+
+      final updatedOrganization = collection == 'Developers' 
+          ? 'JV Almacis' 
+          : _selectedOrganization ?? currentOrg; // Keep current if none selected
+      
       final updatedData = {
         'username': _usernameController.text.trim(),
         'email': _emailController.text.trim(),
-        'organization': _selectedOrganization,
-        'createdAt': currentData['createdAt'],
+        'organization': updatedOrganization,
+        'createdAt': currentData['createdAt'] ?? Timestamp.now(),
         'isDisabled': currentData['isDisabled'] ?? false,
       };
 
-      await _firestore.collection('Admins').doc(uid).update(updatedData);
-      await _logActivity('Edited Admin $uid (User: ${updatedData['username']}, Organization: ${_selectedOrganization ?? '-'})');
+      // Use batch write for consistency
+      final batch = _firestore.batch();
+      
+      // Update role collection
+      batch.set(_firestore.collection(collection).doc(uid), updatedData, SetOptions(merge: true));
+      
+      // Update Users collection
+      batch.set(_firestore.collection('Users').doc(uid), {
+        'username': _usernameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'organization': updatedOrganization,
+      }, SetOptions(merge: true));
+
+      await batch.commit();
+      
+      logger.i('Successfully updated $collection and Users collection for $uid: organization=$updatedOrganization');
+
+      await _logActivity('Edited $collection $uid (User: ${updatedData['username']}, Organization: ${updatedData['organization']})');
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Admin updated successfully!')),
+          SnackBar(content: Text('$collection entry updated successfully!')),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating admin: $e')),
+          SnackBar(content: Text('Error updating $collection entry: $e')),
         );
       }
-      logger.e('Error updating admin: $e');
+      logger.e('Error updating $collection entry: $e');
     }
   }
 
@@ -353,15 +383,15 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
     }
   }
 
-  Future<void> _toggleDisableUser(String uid, String username, bool currentStatus) async {
+  Future<void> _toggleDisableUser(String uid, String username, bool currentStatus, String collection) async {
     bool? confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(currentStatus ? 'Enable User' : 'Disable User'),
         content: Text(
           currentStatus
-              ? 'Are you sure you want to enable $username?'
-              : 'Are you sure you want to disable $username?',
+              ? 'Are you sure you want to enable $username in $collection?'
+              : 'Are you sure you want to disable $username in $collection?',
         ),
         actions: [
           TextButton(
@@ -379,9 +409,10 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
     if (confirm != true) return;
 
     try {
-      await _firestore.collection('Admins').doc(uid).update({'isDisabled': !currentStatus});
-      await _logActivity(
-          '${currentStatus ? 'Enabled' : 'Disabled'} Admin $uid (User: $username)');
+      await _firestore.collection(collection).doc(uid).set({
+        'isDisabled': !currentStatus,
+      }, SetOptions(merge: true));
+      await _logActivity('${currentStatus ? 'Enabled' : 'Disabled'} $collection $uid (User: $username)');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('User ${currentStatus ? 'enabled' : 'disabled'} successfully!')),
@@ -394,6 +425,45 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
         );
       }
       logger.e('Error toggling user status: $e');
+    }
+  }
+
+  Future<void> _deleteAdminLog(String logId) async {
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Deletion'),
+        content: const Text('Are you sure you want to delete this admin log entry?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await _firestore.collection('admin_logs').doc(logId).delete();
+      await _logActivity('Deleted admin log entry $logId');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Admin log entry deleted successfully!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting admin log: $e')),
+        );
+      }
+      logger.e('Error deleting admin log: $e');
     }
   }
 
@@ -410,81 +480,83 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
   }
 
   void _showAssignRoleDialog(String collection, String role) {
-    _selectedOrganization = null; // Reset organization
+    _selectedOrganization = null;
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Assign $role Role', style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _uidController,
-                      decoration: InputDecoration(
-                        labelText: 'Enter User UID',
-                        hintText: 'e.g., abc123xyz789',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Assign $role Role', style: const TextStyle(fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _uidController,
+                        decoration: InputDecoration(
+                          labelText: 'Enter User UID',
+                          hintText: 'e.g., abc123xyz789',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.search, color: Colors.blueGrey),
-                    onPressed: () => _showUserListDialog(collection, role),
-                    tooltip: 'Select User',
+                    IconButton(
+                      icon: const Icon(Icons.search, color: Colors.blueGrey),
+                      onPressed: () => _showUserListDialog(collection, role),
+                      tooltip: 'Select User',
+                    ),
+                  ],
+                ),
+                if (collection == 'Admins' || collection == 'Technicians') ...[
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: _selectedOrganization,
+                    decoration: InputDecoration(
+                      labelText: 'Organization',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    items: ['Embassy', 'JV Almacis'].map((String org) {
+                      return DropdownMenuItem<String>(
+                        value: org,
+                        child: Text(org),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setDialogState(() {
+                        _selectedOrganization = value;
+                      });
+                    },
+                    validator: (value) => value == null ? 'Please select an organization' : null,
                   ),
                 ],
-              ),
-              if (collection == 'Admins') ...[
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  value: _selectedOrganization,
-                  decoration: InputDecoration(
-                    labelText: 'Organization',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  items: ['Embassy', 'JV Almacis'].map((String org) {
-                    return DropdownMenuItem<String>(
-                      value: org,
-                      child: Text(org),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedOrganization = value;
-                    });
-                  },
-                  validator: (value) => value == null ? 'Please select an organization' : null,
-                ),
               ],
-            ],
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              if (_uidController.text.isEmpty) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please enter a UID')),
-                  );
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                if (_uidController.text.isEmpty) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Please enter a UID')),
+                    );
+                  }
+                  return;
                 }
-                return;
-              }
-              _assignRole(_uidController.text, collection, role);
-              Navigator.pop(context);
-              _uidController.clear();
-            },
-            child: const Text('Assign'),
-          ),
-        ],
+                _assignRole(_uidController.text, collection, role);
+                Navigator.pop(context);
+                _uidController.clear();
+              },
+              child: const Text('Assign'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -616,7 +688,7 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
               ],
               rows: docs.map((doc) {
                 final data = doc.data() as Map<String, dynamic>;
-                final uid = doc.id;
+                final docId = doc.id;
 
                 return DataRow(cells: [
                   ...widget.fields.map((field) {
@@ -647,47 +719,42 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
                               icon: const Icon(Icons.more_vert),
                               onSelected: (value) {
                                 if (value == 'remove') {
-                                  if (widget.collectionName == 'Admins') {
-                                    _removeAdmin(uid, data['username']);
+                                  if (widget.collectionName == 'admin_logs') {
+                                    _deleteAdminLog(docId);
                                   } else {
-                                    _removeDeveloper(
-                                        uid, data['username'], data['email']);
+                                    _removeUser(docId, data['username'] ?? 'Unknown', widget.collectionName);
                                   }
-                                } else if (value == 'edit' && widget.collectionName == 'Admins') {
-                                  _editAdmin(uid, data);
-                                } else if (value == 'reset') {
+                                } else if (value == 'edit' && widget.collectionName != 'admin_logs') {
+                                  _editUser(docId, data, widget.collectionName);
+                                } else if (value == 'reset' && widget.collectionName != 'admin_logs') {
                                   _resetPassword(data['email']);
-                                } else if (value == 'disable') {
+                                } else if (value == 'disable' && widget.collectionName != 'admin_logs') {
                                   _toggleDisableUser(
-                                      uid, data['username'], data['isDisabled'] ?? false);
+                                      docId, data['username'] ?? 'Unknown', data['isDisabled'] ?? false, widget.collectionName);
                                 }
                               },
                               itemBuilder: (context) => [
-                                if (widget.collectionName == 'Admins') ...[
+                                if (widget.collectionName != 'admin_logs') ...[
                                   const PopupMenuItem(
                                     value: 'edit',
                                     child: Row(
                                       children: [
                                         Icon(Icons.edit, color: Colors.blueGrey),
                                         SizedBox(width: 8),
-                                        Text('Edit Admin'),
+                                        Text('Edit'),
                                       ],
                                     ),
                                   ),
-                                ],
-                                PopupMenuItem(
-                                  value: 'remove',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.delete, color: Colors.red),
-                                      const SizedBox(width: 8),
-                                      Text(widget.collectionName == 'Admins'
-                                          ? 'Remove Admin'
-                                          : 'Remove Developer'),
-                                    ],
+                                  PopupMenuItem(
+                                    value: 'remove',
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.delete, color: Colors.red),
+                                        const SizedBox(width: 8),
+                                        Text('Remove from ${widget.collectionName}'),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                if (widget.collectionName == 'Admins') ...[
                                   const PopupMenuItem(
                                     value: 'reset',
                                     child: Row(
@@ -715,6 +782,17 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                       ],
                                     ),
                                   ),
+                                ] else ...[
+                                  const PopupMenuItem(
+                                    value: 'remove',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.delete, color: Colors.red),
+                                        SizedBox(width: 8),
+                                        Text('Delete Log'),
+                                      ],
+                                    ),
+                                  ),
                                 ],
                               ],
                             ),
@@ -725,15 +803,20 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
           );
         },
       ),
-      floatingActionButton: widget.collectionName == 'Admins' ||
-              widget.collectionName == 'Developers'
+      floatingActionButton: (widget.collectionName == 'Admins' ||
+              widget.collectionName == 'Developers' ||
+              widget.collectionName == 'Technicians')
           ? FloatingActionButton(
               onPressed: () => _showAssignRoleDialog(
                 widget.collectionName,
-                widget.collectionName == 'Admins' ? 'Admin' : 'Developer',
+                widget.collectionName == 'Admins'
+                    ? 'Admin'
+                    : widget.collectionName == 'Technicians'
+                        ? 'Technician'
+                        : 'Developer',
               ),
               backgroundColor: Colors.blueGrey,
-              tooltip: 'Assign ${widget.collectionName == 'Admins' ? 'Admin' : 'Developer'}',
+              tooltip: 'Assign ${widget.collectionName == 'Admins' ? 'Admin' : widget.collectionName == 'Technicians' ? 'Technician' : 'Developer'}',
               child: const Icon(Icons.add),
             )
           : null,

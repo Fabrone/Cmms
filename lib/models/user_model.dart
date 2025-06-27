@@ -6,6 +6,7 @@ class UserModel {
   final String email;
   final DateTime createdAt;
   final String role;
+  final String organization;
 
   UserModel({
     required this.id,
@@ -13,6 +14,7 @@ class UserModel {
     required this.email,
     required this.createdAt,
     required this.role,
+    required this.organization,
   });
 
   // Convert UserModel to Firestore-compatible map
@@ -23,6 +25,7 @@ class UserModel {
       'email': email,
       'createdAt': createdAt,
       'role': role,
+      'organization': organization,
     };
   }
 
@@ -34,6 +37,7 @@ class UserModel {
       email: map['email'] ?? '',
       createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       role: map['role'] ?? '-',
+      organization: map['organization'] ?? '-',
     );
   }
 }

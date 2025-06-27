@@ -69,8 +69,22 @@ class DeveloperScreenState extends State<DeveloperScreen> {
                       MaterialPageRoute(
                         builder: (context) => const CollectionDetailScreen(
                           collectionName: 'Users',
-                          fields: ['username', 'email', 'role', 'createdAt'],
-                          hasActions: false,
+                          fields: ['username', 'email', 'role', 'organization', 'createdAt'],
+                          hasActions: true,
+                        ),
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.build, color: Colors.blueGrey),
+                    title: const Text('Technicians'),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const CollectionDetailScreen(
+                          collectionName: 'Technicians',
+                          fields: ['username', 'email', 'organization', 'createdAt', 'isDisabled'],
+                          hasActions: true,
                         ),
                       ),
                     ),
@@ -84,7 +98,7 @@ class DeveloperScreenState extends State<DeveloperScreen> {
                         builder: (context) => const CollectionDetailScreen(
                           collectionName: 'admin_logs',
                           fields: ['action', 'timestamp', 'performedBy'],
-                          hasActions: false,
+                          hasActions: true,
                         ),
                       ),
                     ),
@@ -97,7 +111,7 @@ class DeveloperScreenState extends State<DeveloperScreen> {
                       MaterialPageRoute(
                         builder: (context) => const CollectionDetailScreen(
                           collectionName: 'Developers',
-                          fields: ['username', 'email', 'createdAt'],
+                          fields: ['username', 'email', 'organization', 'createdAt'],
                           hasActions: true,
                         ),
                       ),
@@ -113,11 +127,9 @@ class DeveloperScreenState extends State<DeveloperScreen> {
                       ),
                     ),
                   ),
-                  // NEW: System Notifications Access
                   ListTile(
                     leading: const Icon(Icons.notifications_active, color: Colors.blueGrey),
                     title: const Text('System Notifications'),
-                    subtitle: const Text('Manage notification system'),
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
