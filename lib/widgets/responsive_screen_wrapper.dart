@@ -22,6 +22,7 @@ import 'package:cmms/display%20screens/kpi_screen.dart';
 import 'package:cmms/display%20screens/report_screen.dart';
 import 'package:cmms/screens/settings_screen.dart';
 import 'package:cmms/developer/developer_screen.dart';
+import 'dart:async';
 
 class ResponsiveScreenWrapper extends StatefulWidget {
   final String title;
@@ -56,6 +57,8 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   String _currentRole = 'User';
   String _organization = '-';
   bool _isDeveloper = false;
+  bool _isClient = false;
+  final List<StreamSubscription<DocumentSnapshot>> _organizationSubscriptions = [];
 
   @override
   void initState() {
@@ -65,6 +68,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
     _logger.i(
         'Initializing ResponsiveScreenWrapper for ${widget.title}, facilityId: ${widget.facilityId}, role: $_currentRole, org: $_organization');
     _fetchUserRoleWithRetry();
+    _setupOrganizationListeners();
     // Force rebuild after 2 seconds to catch late query results
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
@@ -72,6 +76,108 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         _logger.d('Forced UI rebuild for ${widget.title} after 2s');
       }
     });
+  }
+
+  @override
+  void dispose() {
+    for (var subscription in _organizationSubscriptions) {
+      subscription.cancel();
+    }
+    super.dispose();
+  }
+
+  void _setupOrganizationListeners() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Clear existing subscriptions
+    for (var subscription in _organizationSubscriptions) {
+      subscription.cancel();
+    }
+    _organizationSubscriptions.clear();
+
+    // Listen to Users collection for organization changes
+    final usersStream = FirebaseFirestore.instance
+        .collection('Users')
+        .doc(user.uid)
+        .snapshots();
+    
+    final usersSubscription = usersStream.listen(
+      (snapshot) {
+        if (snapshot.exists) {
+          _logger.i('Organization update detected in Users collection for ${user.uid}');
+          _checkClientStatus();
+        }
+      },
+      onError: (error) {
+        _logger.e('Error in Users organization listener: $error');
+      },
+    );
+    _organizationSubscriptions.add(usersSubscription);
+
+    // Listen to Technicians collection for organization changes
+    final techniciansStream = FirebaseFirestore.instance
+        .collection('Technicians')
+        .doc(user.uid)
+        .snapshots();
+    
+    final techniciansSubscription = techniciansStream.listen(
+      (snapshot) {
+        if (snapshot.exists) {
+          _logger.i('Organization update detected in Technicians collection for ${user.uid}');
+          _checkClientStatus();
+        }
+      },
+      onError: (error) {
+        _logger.e('Error in Technicians organization listener: $error');
+      },
+    );
+    _organizationSubscriptions.add(techniciansSubscription);
+  }
+
+  Future<void> _checkClientStatus() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      bool isClient = false;
+      String orgFromCheck = '-';
+
+      // First check if user is a Technician
+      final technicianDoc = await FirebaseFirestore.instance
+          .collection('Technicians')
+          .doc(user.uid)
+          .get();
+
+      if (technicianDoc.exists) {
+        // User is a Technician - check organization from Technicians collection
+        orgFromCheck = technicianDoc.data()?['organization'] ?? '-';
+        isClient = orgFromCheck != 'JV Almacis';
+        _logger.i('Technician organization check: $orgFromCheck, isClient: $isClient');
+      } else {
+        // User is not a Technician - check organization from Users collection
+        final userDoc = await FirebaseFirestore.instance
+            .collection('Users')
+            .doc(user.uid)
+            .get();
+
+        if (userDoc.exists) {
+          orgFromCheck = userDoc.data()?['organization'] ?? '-';
+          isClient = orgFromCheck != 'JV Almacis';
+          _logger.i('User organization check: $orgFromCheck, isClient: $isClient');
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _isClient = isClient;
+          _organization = orgFromCheck;
+        });
+        _logger.i('Updated client status for ${widget.title}: isClient=$isClient, org=$orgFromCheck');
+      }
+    } catch (e) {
+      _logger.e('Error checking client status: $e');
+    }
   }
 
   Future<void> _fetchUserRoleWithRetry(
@@ -144,6 +250,9 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
                 'Updated state for ${widget.title}: role=$newRole, org=$newOrg, isDeveloper=$isDev');
           });
         }
+
+        // Check client status after role fetch
+        await _checkClientStatus();
         return; // Success, exit retry loop
       } catch (e, stackTrace) {
         _logger.e(
@@ -249,7 +358,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
   Widget _buildDrawer() {
     _logger
-        .d('Building drawer for ${widget.title}, isDeveloper: $_isDeveloper');
+        .d('Building drawer for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient');
     return Drawer(
       child: Column(
         children: [
@@ -262,7 +371,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
   Widget _buildSidebar() {
     _logger
-        .d('Building sidebar for ${widget.title}, isDeveloper: $_isDeveloper');
+        .d('Building sidebar for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient');
     return Container(
       width: 250,
       color: Colors.blueGrey[50],
@@ -281,7 +390,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
   Widget _buildAppIcon() {
     _logger
-        .d('Building app icon for ${widget.title}, isDeveloper: $_isDeveloper');
+        .d('Building app icon for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient');
 
     return GestureDetector(
       onTap: _isDeveloper ? _handleDeveloperIconTap : null,
@@ -290,19 +399,44 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         padding: const EdgeInsets.symmetric(vertical: 20),
         width: double.infinity,
         child: Center(
-          child: Container(
-            decoration: _isDeveloper
-                ? BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    color: Colors.blueGrey.withValues(alpha: 0.1),
-                  )
-                : null,
-            padding: const EdgeInsets.all(8),
-            child: Image.asset(
-              'assets/icons/icon.png',
-              width: 60,
-              height: 60,
-            ),
+          child: Stack(
+            children: [
+              Container(
+                decoration: _isDeveloper
+                    ? BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        color: Colors.blueGrey.withValues(alpha: 0.1),
+                      )
+                    : null,
+                padding: const EdgeInsets.all(8),
+                child: Image.asset(
+                  'assets/icons/icon.png',
+                  width: 60,
+                  height: 60,
+                ),
+              ),
+              // Client indicator
+              if (_isClient)
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.8),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'Client',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
@@ -318,9 +452,9 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'Embassy': [
           'Facilities',
           'Locations',
+          'Documentations',
           'Building Survey',
           'Drawings',
-          'Documentations',
           'Schedule Maintenance',
           'Preventive Maintenance',
           'Reports',
@@ -333,9 +467,9 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'JV Almacis': [
           'Facilities',
           'Locations',
+          'Documentations',
           'Building Survey',
           'Drawings',
-          'Documentations',
           'Schedule Maintenance',
           'Preventive Maintenance',
           'Reports',
@@ -355,11 +489,11 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'Embassy': [
           'Facilities',
           'Locations',
+          'Documentations',
           'Preventive Maintenance',
           'Schedule Maintenance',
           'Building Survey',
           'Drawings',
-          'Documentations',
           'Reports',
           'Work on Request',
           'Work Orders',
@@ -370,11 +504,11 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'JV Almacis': [
           'Facilities',
           'Locations',
+          'Documentations',
           'Preventive Maintenance',
           'Schedule Maintenance',
           'Building Survey',
           'Drawings',
-          'Documentations',
           'Reports',
           'Price Lists',
           'Work on Request',
@@ -391,16 +525,17 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       },
     };
 
+    // Updated menu structure with Documentations moved after Locations
     final menuStructure = [
       {'title': 'Facilities', 'icon': Icons.business, 'isSubItem': false},
       {'title': 'Locations', 'icon': Icons.location_on, 'isSubItem': false},
+      {'title': 'Documentations', 'icon': Icons.description, 'isSubItem': false}, // Moved here and made main item
       {
         'title': 'Building Survey',
         'icon': Icons.account_balance,
         'isSubItem': false
       },
       {'title': 'Drawings', 'icon': Icons.brush, 'isSubItem': true},
-      {'title': 'Documentations', 'icon': Icons.description, 'isSubItem': true},
       {
         'title': 'Schedule Maintenance',
         'icon': Icons.event,
