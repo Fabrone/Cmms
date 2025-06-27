@@ -26,9 +26,11 @@ class DashboardScreenState extends State<DashboardScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String _currentRole = 'User';
   String _organization = '-';
+  bool _isClient = false;
   String? _selectedFacilityId;
   bool _isFacilitySelectionActive = true;
   List<StreamSubscription<DocumentSnapshot>> _roleSubscriptions = [];
+  final List<StreamSubscription<DocumentSnapshot>> _organizationSubscriptions = [];
 
   @override
   void initState() {
@@ -37,6 +39,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     _selectedFacilityId = widget.facilityId.isNotEmpty ? widget.facilityId : null;
     _isFacilitySelectionActive = widget.facilityId.isEmpty;
     _checkUserRole();
+    _setupOrganizationListeners();
   }
 
   @override
@@ -44,7 +47,106 @@ class DashboardScreenState extends State<DashboardScreen> {
     for (var subscription in _roleSubscriptions) {
       subscription.cancel();
     }
+    for (var subscription in _organizationSubscriptions) {
+      subscription.cancel();
+    }
     super.dispose();
+  }
+
+  void _setupOrganizationListeners() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Clear existing organization subscriptions
+    for (var subscription in _organizationSubscriptions) {
+      subscription.cancel();
+    }
+    _organizationSubscriptions.clear();
+
+    // Listen to Users collection for organization changes
+    final usersStream = FirebaseFirestore.instance
+        .collection('Users')
+        .doc(user.uid)
+        .snapshots();
+    
+    final usersSubscription = usersStream.listen(
+      (snapshot) {
+        if (snapshot.exists) {
+          logger.i('Organization update detected in Users collection for ${user.uid}');
+          _checkClientStatus();
+        }
+      },
+      onError: (error) {
+        logger.e('Error in Users organization listener: $error');
+      },
+    );
+    _organizationSubscriptions.add(usersSubscription);
+
+    // Listen to Technicians collection for organization changes
+    final techniciansStream = FirebaseFirestore.instance
+        .collection('Technicians')
+        .doc(user.uid)
+        .snapshots();
+    
+    final techniciansSubscription = techniciansStream.listen(
+      (snapshot) {
+        if (snapshot.exists) {
+          logger.i('Organization update detected in Technicians collection for ${user.uid}');
+          _checkClientStatus();
+        }
+      },
+      onError: (error) {
+        logger.e('Error in Technicians organization listener: $error');
+      },
+    );
+    _organizationSubscriptions.add(techniciansSubscription);
+  }
+
+  Future<void> _checkClientStatus() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      bool isClient = false;
+      String orgFromCheck = '-';
+
+      // First check if user is a Technician
+      final technicianDoc = await FirebaseFirestore.instance
+          .collection('Technicians')
+          .doc(user.uid)
+          .get();
+
+      if (technicianDoc.exists) {
+        // User is a Technician - check organization from Technicians collection
+        orgFromCheck = technicianDoc.data()?['organization'] ?? '-';
+        isClient = orgFromCheck != 'JV Almacis';
+        logger.i('Technician organization check: $orgFromCheck, isClient: $isClient');
+      } else {
+        // User is not a Technician - check organization from Users collection
+        final userDoc = await FirebaseFirestore.instance
+            .collection('Users')
+            .doc(user.uid)
+            .get();
+
+        if (userDoc.exists) {
+          orgFromCheck = userDoc.data()?['organization'] ?? '-';
+          isClient = orgFromCheck != 'JV Almacis';
+          logger.i('User organization check: $orgFromCheck, isClient: $isClient');
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _isClient = isClient;
+          if (orgFromCheck != '-') {
+            _organization = orgFromCheck;
+          }
+        });
+        logger.i('Updated client status: isClient=$isClient, org=$orgFromCheck');
+      }
+    } catch (e) {
+      logger.e('Error checking client status: $e');
+    }
   }
 
   Future<void> _checkUserRole() async {
@@ -66,6 +168,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     _setupRoleListener('Users', user.uid);
 
     await _updateUserRoleAndOrganization(user.uid);
+    await _checkClientStatus();
   }
 
   void _setupRoleListener(String collection, String uid) {
@@ -77,6 +180,7 @@ class DashboardScreenState extends State<DashboardScreen> {
       (snapshot) {
         logger.i('Role update detected in $collection for $uid');
         _updateUserRoleAndOrganization(uid);
+        _checkClientStatus();
       },
       onError: (error) {
         logger.e('Error in $collection listener: $error');
@@ -140,10 +244,14 @@ class DashboardScreenState extends State<DashboardScreen> {
           _currentRole = newRole;
           _organization = newOrg;
         });
+        
+        // Determine client/service provider status
+        String statusText = _isClient ? 'Client' : 'Service Provider';
+        
         _messengerKey.currentState?.showSnackBar(
           SnackBar(
             content: Text(
-              'Your role is now: $_currentRole${_organization != '-' ? ' ($_organization)' : ''}',
+              'Your role is now: $_currentRole${_organization != '-' ? ' ($_organization)' : ''} - $statusText',
               style: GoogleFonts.poppins(),
             ),
             duration: const Duration(seconds: 3),
@@ -157,6 +265,7 @@ class DashboardScreenState extends State<DashboardScreen> {
         setState(() {
           _currentRole = 'User';
           _organization = '-';
+          _isClient = false;
         });
       }
     }
