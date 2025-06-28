@@ -10,6 +10,7 @@ class Request {
   final DateTime? createdAt;
   final String createdBy;
   final String? createdByEmail;
+  final String facilityId;
   final List<Map<String, String>> attachments;
   final List<Map<String, dynamic>> comments;
   final List<String> workOrderIds;
@@ -25,6 +26,7 @@ class Request {
     this.createdAt,
     required this.createdBy,
     this.createdByEmail,
+    required this.facilityId,
     required this.attachments,
     required this.comments,
     required this.workOrderIds,
@@ -33,9 +35,13 @@ class Request {
 
   factory Request.fromSnapshot(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    return Request.fromMap(data, doc.id);
+  }
+
+  factory Request.fromMap(Map<String, dynamic> data, String id) {
     return Request(
-      id: doc.id,
-      requestId: data['requestId'] ?? '',
+      id: id,
+      requestId: data['requestId'] ?? id,
       title: data['title'] ?? '',
       description: data['description'] ?? '',
       status: data['status'] ?? 'Open',
@@ -43,6 +49,7 @@ class Request {
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
       createdBy: data['createdBy'] ?? '',
       createdByEmail: data['createdByEmail'],
+      facilityId: data['facilityId'] ?? '',
       attachments: (data['attachments'] as List<dynamic>?)
           ?.map((item) => Map<String, String>.from(item as Map))
           .toList() ?? [],
@@ -66,6 +73,7 @@ class Request {
       'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : null,
       'createdBy': createdBy,
       'createdByEmail': createdByEmail,
+      'facilityId': facilityId,
       'attachments': attachments,
       'comments': comments,
       'workOrderIds': workOrderIds,
