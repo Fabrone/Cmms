@@ -18,9 +18,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 class BillingScreen extends StatefulWidget {
   final String facilityId;
-  final String userRole;
 
-  const BillingScreen({super.key, required this.facilityId, required this.userRole});
+  const BillingScreen({super.key, required this.facilityId, required String userRole});
 
   @override
   State<BillingScreen> createState() => _BillingScreenState();
@@ -34,11 +33,18 @@ class _BillingScreenState extends State<BillingScreen> {
   bool _showForm = false;
   bool _hasViewedDocument = false;
   String? _currentViewingDocId;
+  
+  // User role information
+  String _currentRole = 'User';
+  String _organization = '-';
+  bool _isJVAlmacisAdmin = false;
+  bool _isClientAdmin = false;
 
   @override
   void initState() {
     super.initState();
-    logger.i('BillingScreen initialized with facilityId: ${widget.facilityId}, role: ${widget.userRole}');
+    _getCurrentUserInfo();
+    logger.i('BillingScreen initialized with facilityId: ${widget.facilityId}');
   }
 
   @override
@@ -47,11 +53,63 @@ class _BillingScreenState extends State<BillingScreen> {
     super.dispose();
   }
 
-  bool get _isAdmin => widget.userRole == 'Admin';
+  Future<void> _getCurrentUserInfo() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
+      final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
+      final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance.collection('Users').doc(user.uid).get();
+
+      String newRole = 'User';
+      String newOrg = '-';
+      bool isJVAlmacisAdmin = false;
+      bool isClientAdmin = false;
+
+      if (adminDoc.exists) {
+        newRole = 'Admin';
+        newOrg = adminDoc.data()?['organization'] ?? '-';
+        isClientAdmin = newOrg != 'JV Almacis';
+        isJVAlmacisAdmin = newOrg == 'JV Almacis';
+      } else if (developerDoc.exists) {
+        newRole = 'Developer';
+        newOrg = 'JV Almacis';
+        isJVAlmacisAdmin = true;
+      } else if (technicianDoc.exists) {
+        newRole = 'Technician';
+        newOrg = technicianDoc.data()?['organization'] ?? '-';
+      } else if (userDoc.exists) {
+        final userData = userDoc.data();
+        if (userData != null && userData['role'] == 'Technician') {
+          newRole = 'Technician';
+          newOrg = userData['organization'] ?? '-';
+        } else {
+          newRole = 'User';
+          newOrg = userData?['organization'] ?? '-';
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _currentRole = newRole;
+          _organization = newOrg;
+          _isJVAlmacisAdmin = isJVAlmacisAdmin;
+          _isClientAdmin = isClientAdmin;
+        });
+        logger.i('User role info: role=$newRole, org=$newOrg, isJVAlmacisAdmin=$isJVAlmacisAdmin, isClientAdmin=$isClientAdmin');
+      }
+    } catch (e) {
+      logger.e('Error getting user info: $e');
+    }
+  }
+
+  bool get _canUpload => _isJVAlmacisAdmin;
 
   Future<void> _uploadDocument() async {
-    if (!_isAdmin) {
-      if (mounted) _showSnackBar('Only admins can upload billing documents');
+    if (!_canUpload) {
+      if (mounted) _showSnackBar('Only JV Almacis admins can upload billing documents');
       return;
     }
 
@@ -409,8 +467,8 @@ class _BillingScreenState extends State<BillingScreen> {
   }
 
   Future<void> _updateBillingStatus(String docId, String newStatus) async {
-    if (!_isAdmin) {
-      if (mounted) _showSnackBar('Only admins can update billing status');
+    if (!_isJVAlmacisAdmin) {
+      if (mounted) _showSnackBar('Only JV Almacis admins can update billing status');
       return;
     }
 
@@ -428,8 +486,8 @@ class _BillingScreenState extends State<BillingScreen> {
   }
 
   Future<void> _updateApprovalStatus(String docId, String approvalStatus, String? notes) async {
-    if (_isAdmin) {
-      if (mounted) _showSnackBar('Admins cannot approve/decline their own documents');
+    if (!_isClientAdmin) {
+      if (mounted) _showSnackBar('Only client admins can approve/decline documents');
       return;
     }
 
@@ -451,6 +509,49 @@ class _BillingScreenState extends State<BillingScreen> {
     } catch (e, stackTrace) {
       logger.e('Error updating approval status: $e', stackTrace: stackTrace);
       if (mounted) _showSnackBar('Error updating approval status: $e');
+    }
+  }
+
+  Future<void> _deleteDocument(String docId, String fileName) async {
+    if (!_isJVAlmacisAdmin) {
+      if (mounted) _showSnackBar('Only JV Almacis admins can delete documents');
+      return;
+    }
+
+    final bool? confirmDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Document', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text(
+          'Are you sure you want to delete "$fileName"? This action cannot be undone.',
+          style: GoogleFonts.poppins(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: GoogleFonts.poppins()),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red[700],
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmDelete != true) return;
+
+    try {
+      await FirebaseFirestore.instance.collection('BillingData').doc(docId).delete();
+      if (mounted) _showSnackBar('Document deleted successfully');
+      logger.i('Deleted billing document: $docId');
+    } catch (e, stackTrace) {
+      logger.e('Error deleting billing document: $e', stackTrace: stackTrace);
+      if (mounted) _showSnackBar('Error deleting document: $e');
     }
   }
 
@@ -482,9 +583,9 @@ class _BillingScreenState extends State<BillingScreen> {
     return ResponsiveScreenWrapper(
       title: 'Billing',
       facilityId: widget.facilityId,
-      currentRole: widget.userRole,
-      organization: '-',
-      floatingActionButton: _isAdmin
+      currentRole: _currentRole,
+      organization: _organization,
+      floatingActionButton: _canUpload
           ? FloatingActionButton.extended(
               onPressed: () => setState(() => _showForm = !_showForm),
               backgroundColor: Colors.blueGrey[800],
@@ -503,16 +604,17 @@ class _BillingScreenState extends State<BillingScreen> {
   Widget _buildBody() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth <= 600;
-    final padding = isMobile ? 16.0 : screenWidth <= 900 ? 24.0 : 32.0;
-    final fontSizeTitle = isMobile ? 20.0 : screenWidth <= 900 ? 24.0 : 28.0;
-    final fontSizeSubtitle = isMobile ? 14.0 : screenWidth <= 900 ? 16.0 : 18.0;
+    final isTablet = screenWidth > 600 && screenWidth <= 900;
+    final padding = isMobile ? 16.0 : isTablet ? 24.0 : 32.0;
+    final fontSizeTitle = isMobile ? 20.0 : isTablet ? 24.0 : 28.0;
+    final fontSizeSubtitle = isMobile ? 14.0 : isTablet ? 16.0 : 18.0;
 
     return SingleChildScrollView(
       padding: EdgeInsets.all(padding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (_isAdmin && _showForm) _buildUploadForm(padding, fontSizeTitle, fontSizeSubtitle),
+          if (_canUpload && _showForm) _buildUploadForm(padding, fontSizeTitle, fontSizeSubtitle),
           const SizedBox(height: 24),
           Row(
             children: [
@@ -583,7 +685,7 @@ class _BillingScreenState extends State<BillingScreen> {
                             color: Colors.grey[600],
                           ),
                         ),
-                        if (_isAdmin) ...[
+                        if (_canUpload) ...[
                           const SizedBox(height: 8),
                           Text(
                             'Tap the upload button to add your first billing document',
@@ -599,9 +701,7 @@ class _BillingScreenState extends State<BillingScreen> {
                 );
               }
               logger.i('Found ${docs.length} billing documents');
-              return isMobile
-                  ? _buildBillingTable(docs, fontSizeSubtitle)
-                  : _buildBillingList(docs, isMobile, fontSizeSubtitle);
+              return _buildBillingList(docs, isMobile, fontSizeSubtitle);
             },
           ),
         ],
@@ -685,55 +785,6 @@ class _BillingScreenState extends State<BillingScreen> {
     );
   }
 
-  Widget _buildBillingTable(List<QueryDocumentSnapshot> docs, double fontSize) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Card(
-        elevation: 4,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: DataTable(
-          columns: [
-            DataColumn(
-              label: Text('Document', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: fontSize)),
-            ),
-            DataColumn(
-              label: Text('Status', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: fontSize)),
-            ),
-            DataColumn(
-              label: Text('Approval', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: fontSize)),
-            ),
-            DataColumn(
-              label: Text('Actions', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: fontSize)),
-            ),
-          ],
-          rows: docs.map((doc) {
-            final billing = BillingData.fromSnapshot(doc);
-            return DataRow(cells: [
-              DataCell(
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(billing.title, style: GoogleFonts.poppins(fontSize: fontSize)),
-                    Text(
-                      billing.uploadedAt != null
-                          ? DateFormat('MMM dd, yyyy').format(billing.uploadedAt!)
-                          : 'Unknown date',
-                      style: GoogleFonts.poppins(fontSize: fontSize - 2, color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-              ),
-              DataCell(_buildStatusChip(billing.status, fontSize)),
-              DataCell(_buildStatusChip(billing.approvalStatus, fontSize)),
-              DataCell(_buildActionButtons(billing, true)),
-            ]);
-          }).toList(),
-        ),
-      ),
-    );
-  }
-
   Widget _buildBillingList(List<QueryDocumentSnapshot> docs, bool isMobile, double fontSize) {
     return ListView.builder(
       shrinkWrap: true,
@@ -753,45 +804,127 @@ class _BillingScreenState extends State<BillingScreen> {
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              Icons.receipt,
-              color: Colors.blueGrey[700],
-              size: isMobile ? 32 : 36,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    billing.title,
-                    style: GoogleFonts.poppins(
-                      color: Colors.blueGrey[900],
-                      fontWeight: FontWeight.w600,
-                      fontSize: fontSize,
-                    ),
-                  ),
-                  Text(
-                    'Uploaded: ${billing.uploadedAt != null ? DateFormat('MMM dd, yyyy').format(billing.uploadedAt!) : 'Unknown date'}',
-                    style: GoogleFonts.poppins(
-                      fontSize: isMobile ? 12 : 14,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
+            Row(
+              children: [
+                Icon(
+                  Icons.receipt,
+                  color: Colors.blueGrey[700],
+                  size: isMobile ? 32 : 36,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildStatusChip(billing.status, fontSize),
-                      _buildStatusChip(billing.approvalStatus, fontSize),
+                      Text(
+                        billing.title,
+                        style: GoogleFonts.poppins(
+                          color: Colors.blueGrey[900],
+                          fontWeight: FontWeight.w600,
+                          fontSize: fontSize,
+                        ),
+                      ),
+                      Text(
+                        'Uploaded: ${billing.uploadedAt != null ? DateFormat('MMM dd, yyyy').format(billing.uploadedAt!) : 'Unknown date'}',
+                        style: GoogleFonts.poppins(
+                          fontSize: isMobile ? 12 : 14,
+                          color: Colors.grey[600],
+                        ),
+                      ),
                     ],
                   ),
+                ),
+                _buildActionButtons(billing),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Status section with proper labels
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[200]!),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Approval Status',
+                              style: GoogleFonts.poppins(
+                                fontSize: fontSize - 2,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.blueGrey[700],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            _buildStatusChip(billing.approvalStatus, fontSize),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Payment Status',
+                              style: GoogleFonts.poppins(
+                                fontSize: fontSize - 2,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.blueGrey[700],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            _buildStatusChip(billing.status, fontSize),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (billing.approvalNotes != null && billing.approvalNotes!.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Approval Notes:',
+                            style: GoogleFonts.poppins(
+                              fontSize: fontSize - 3,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.blueGrey[700],
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            billing.approvalNotes!,
+                            style: GoogleFonts.poppins(
+                              fontSize: fontSize - 3,
+                              color: Colors.blueGrey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
-            _buildActionButtons(billing, false),
           ],
         ),
       ),
@@ -854,99 +987,41 @@ class _BillingScreenState extends State<BillingScreen> {
     );
   }
 
-  Widget _buildActionButtons(BillingData billing, bool isCompact) {
-    if (_isAdmin) {
-      return PopupMenuButton<String>(
-        onSelected: (value) {
-          if (value == 'view') {
-            _viewDocument(billing.downloadUrl, billing.fileName, billing.id);
-          } else if (value == 'download') {
-            _downloadDocument(billing.downloadUrl, billing.fileName);
-          } else if (value == 'mark_paid') {
-            _updateBillingStatus(billing.id, 'paid');
-          } else if (value == 'mark_pending') {
-            _updateBillingStatus(billing.id, 'pending');
-          }
-        },
-        itemBuilder: (context) => [
-          PopupMenuItem(
-            value: 'view',
-            child: Row(
-              children: [
-                Icon(Icons.visibility, color: Colors.blue[700], size: 20),
-                const SizedBox(width: 8),
-                Text('View', style: GoogleFonts.poppins()),
-              ],
-            ),
-          ),
-          PopupMenuItem(
-            value: 'download',
-            child: Row(
-              children: [
-                Icon(Icons.download, color: Colors.green[700], size: 20),
-                const SizedBox(width: 8),
-                Text('Download', style: GoogleFonts.poppins()),
-              ],
-            ),
-          ),
-          PopupMenuItem(
-            value: 'mark_paid',
-            child: Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.green[700], size: 20),
-                const SizedBox(width: 8),
-                Text('Mark as Paid', style: GoogleFonts.poppins()),
-              ],
-            ),
-          ),
-          PopupMenuItem(
-            value: 'mark_pending',
-            child: Row(
-              children: [
-                Icon(Icons.pending, color: Colors.orange[700], size: 20),
-                const SizedBox(width: 8),
-                Text('Mark as Pending', style: GoogleFonts.poppins()),
-              ],
-            ),
-          ),
-        ],
-        icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
-      );
-    } else {
+  Widget _buildActionButtons(BillingData billing) {
+    List<PopupMenuEntry<String>> menuItems = [];
+
+    // View and Download are available to all users
+    menuItems.addAll([
+      PopupMenuItem(
+        value: 'view',
+        child: Row(
+          children: [
+            Icon(Icons.visibility, color: Colors.blue[700], size: 20),
+            const SizedBox(width: 8),
+            Text('View', style: GoogleFonts.poppins()),
+          ],
+        ),
+      ),
+      PopupMenuItem(
+        value: 'download',
+        child: Row(
+          children: [
+            Icon(Icons.download, color: Colors.green[700], size: 20),
+            const SizedBox(width: 8),
+            Text('Download', style: GoogleFonts.poppins()),
+          ],
+        ),
+      ),
+    ]);
+
+    // Client Admin specific actions
+    if (_isClientAdmin) {
       final canApprove = _hasViewedDocument && _currentViewingDocId == billing.id;
-      return PopupMenuButton<String>(
-        onSelected: (value) {
-          if (value == 'view') {
-            _viewDocument(billing.downloadUrl, billing.fileName, billing.id);
-          } else if (value == 'download') {
-            _downloadDocument(billing.downloadUrl, billing.fileName);
-          } else if (value == 'approve') {
-            _updateApprovalStatus(billing.id, 'approved', null);
-          } else if (value == 'decline') {
-            _showDeclineDialog(billing.id);
-          }
-        },
-        itemBuilder: (context) => [
-          PopupMenuItem(
-            value: 'view',
-            child: Row(
-              children: [
-                Icon(Icons.visibility, color: Colors.blue[700], size: 20),
-                const SizedBox(width: 8),
-                Text('View', style: GoogleFonts.poppins()),
-              ],
-            ),
-          ),
-          PopupMenuItem(
-            value: 'download',
-            child: Row(
-              children: [
-                Icon(Icons.download, color: Colors.green[700], size: 20),
-                const SizedBox(width: 8),
-                Text('Download', style: GoogleFonts.poppins()),
-              ],
-            ),
-          ),
+      final isApproved = billing.approvalStatus.toLowerCase() == 'approved';
+      final isDeclined = billing.approvalStatus.toLowerCase() == 'declined';
+
+      if (!isApproved) {
+        menuItems.add(
           PopupMenuItem(
             value: 'approve',
             enabled: canApprove,
@@ -967,6 +1042,11 @@ class _BillingScreenState extends State<BillingScreen> {
               ],
             ),
           ),
+        );
+      }
+
+      if (!isDeclined) {
+        menuItems.add(
           PopupMenuItem(
             value: 'decline',
             enabled: canApprove,
@@ -987,10 +1067,75 @@ class _BillingScreenState extends State<BillingScreen> {
               ],
             ),
           ),
-        ],
-        icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
-      );
+        );
+      }
     }
+
+    // JV Almacis Admin specific actions
+    if (_isJVAlmacisAdmin) {
+      menuItems.addAll([
+        PopupMenuItem(
+          value: 'mark_paid',
+          child: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.green[700], size: 20),
+              const SizedBox(width: 8),
+              Text('Mark as Paid', style: GoogleFonts.poppins()),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'mark_pending',
+          child: Row(
+            children: [
+              Icon(Icons.pending, color: Colors.orange[700], size: 20),
+              const SizedBox(width: 8),
+              Text('Mark as Pending', style: GoogleFonts.poppins()),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete, color: Colors.red[700], size: 20),
+              const SizedBox(width: 8),
+              Text('Delete', style: GoogleFonts.poppins(color: Colors.red[700])),
+            ],
+          ),
+        ),
+      ]);
+    }
+
+    return PopupMenuButton<String>(
+      onSelected: (value) {
+        switch (value) {
+          case 'view':
+            _viewDocument(billing.downloadUrl, billing.fileName, billing.id);
+            break;
+          case 'download':
+            _downloadDocument(billing.downloadUrl, billing.fileName);
+            break;
+          case 'approve':
+            _updateApprovalStatus(billing.id, 'approved', null);
+            break;
+          case 'decline':
+            _showDeclineDialog(billing.id);
+            break;
+          case 'mark_paid':
+            _updateBillingStatus(billing.id, 'paid');
+            break;
+          case 'mark_pending':
+            _updateBillingStatus(billing.id, 'pending');
+            break;
+          case 'delete':
+            _deleteDocument(billing.id, billing.fileName);
+            break;
+        }
+      },
+      itemBuilder: (context) => menuItems,
+      icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
+    );
   }
 
   void _showDeclineDialog(String docId) {
