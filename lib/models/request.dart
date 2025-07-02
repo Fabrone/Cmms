@@ -10,6 +10,7 @@ class Request {
   final DateTime? createdAt;
   final String createdBy;
   final String? createdByEmail;
+  final String? createdByUsername;
   final String facilityId;
   final List<Map<String, String>> attachments;
   final List<Map<String, dynamic>> comments;
@@ -26,6 +27,7 @@ class Request {
     this.createdAt,
     required this.createdBy,
     this.createdByEmail,
+    this.createdByUsername,
     required this.facilityId,
     required this.attachments,
     required this.comments,
@@ -49,6 +51,7 @@ class Request {
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
       createdBy: data['createdBy'] ?? '',
       createdByEmail: data['createdByEmail'],
+      createdByUsername: data['createdByUsername'],
       facilityId: data['facilityId'] ?? '',
       attachments: (data['attachments'] as List<dynamic>?)
           ?.map((item) => Map<String, String>.from(item as Map))
@@ -73,6 +76,7 @@ class Request {
       'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : null,
       'createdBy': createdBy,
       'createdByEmail': createdByEmail,
+      'createdByUsername': createdByUsername,
       'facilityId': facilityId,
       'attachments': attachments,
       'comments': comments,

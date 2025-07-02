@@ -38,6 +38,10 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
   
   String _priority = 'Medium';
   String _statusFilter = 'All';
+  String _priorityFilter = 'All';
+  String _workOrderStatusFilter = 'All';
+  bool _isClientStatusFilterMode = true;
+  bool _isInApprovedSubView = false; // Track if we're in the approved sub-view
   String? _selectedRequestId;
   String? _selectedTechnicianId;
   String? _selectedTechnicianEmail;
@@ -49,15 +53,32 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
   bool _isJVAlmacisUser = false;
   bool _isAdminClient = false;
   String? _createdByEmail;
+  String? _createdByUsername;
   double? _uploadProgress;
   late TabController _tabController;
   bool _isSubmitting = false;
 
-  // Status counts for tabs - using individual variables to prevent rebuild issues
+  // Client status counts
   int _allCount = 0;
   int _approvedCount = 0;
   int _declinedCount = 0;
   int _toBeReviewedCount = 0;
+
+  // Priority counts
+  int _allPriorityCount = 0;
+  int _highPriorityCount = 0;
+  int _mediumPriorityCount = 0;
+  int _lowPriorityCount = 0;
+
+  // Work order status counts (for approved sub-view)
+  int _approvedAllCount = 0;
+  int _approvedOpenCount = 0;
+  int _approvedInProgressCount = 0;
+  int _approvedCompletedCount = 0;
+
+  // Cache for all work orders to avoid repeated queries
+  List<QueryDocumentSnapshot> _allWorkOrders = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -89,36 +110,43 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
       String newRole = 'User';
       String newOrg = '-';
       String? email = user.email;
+      String? username;
       bool isClient = false;
       bool isJVAlmacisUser = false;
       bool isAdminClient = false;
 
       if (adminDoc.exists) {
         newRole = 'Admin';
-        newOrg = adminDoc.data()?['organization'] ?? '-';
+        final data = adminDoc.data()!;
+        newOrg = data['organization'] ?? '-';
+        username = data['username'] ?? data['name'] ?? data['displayName'];
         isClient = newOrg != 'JV Almacis';
         isAdminClient = isClient; // Admin client has special privileges
       } else if (developerDoc.exists) {
         newRole = 'Technician';
         newOrg = 'JV Almacis';
+        final data = developerDoc.data()!;
+        username = data['username'] ?? data['name'] ?? data['displayName'];
         isJVAlmacisUser = true;
       } else if (technicianDoc.exists) {
         newRole = 'Technician';
-        newOrg = technicianDoc.data()?['organization'] ?? '-';
+        final data = technicianDoc.data()!;
+        newOrg = data['organization'] ?? '-';
+        username = data['username'] ?? data['name'] ?? data['displayName'];
         isClient = newOrg != 'JV Almacis';
         isJVAlmacisUser = newOrg == 'JV Almacis';
       } else if (userDoc.exists) {
-        final userData = userDoc.data();
-        if (userData != null && userData['role'] == 'Technician') {
+        final userData = userDoc.data()!;
+        if (userData['role'] == 'Technician') {
           newRole = 'Technician';
           newOrg = userData['organization'] ?? '-';
-          isClient = newOrg != 'JV Almacis';
-          isJVAlmacisUser = newOrg == 'JV Almacis';
         } else {
           newRole = 'User';
-          newOrg = userData?['organization'] ?? '-';
-          isClient = newOrg != 'JV Almacis';
+          newOrg = userData['organization'] ?? '-';
         }
+        username = userData['username'] ?? userData['name'] ?? userData['displayName'];
+        isClient = newOrg != 'JV Almacis';
+        isJVAlmacisUser = newOrg == 'JV Almacis';
       }
 
       if (mounted) {
@@ -128,16 +156,109 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
           _isJVAlmacisUser = isJVAlmacisUser;
           _isAdminClient = isAdminClient;
           _createdByEmail = email;
+          _createdByUsername = username;
         });
+        _logger.i('Updated user info for Work Orders: isJVAlmacis=$isJVAlmacisUser, org=$newOrg, username=$username');
       }
     } catch (e) {
       _logger.e('Error getting user info: $e');
     }
   }
 
+  // Add this method to fetch username from Users collection
+  Future<String> _getUsernameFromCollection(String userId) async {
+    try {
+      // Check Users collection first
+      final userDoc = await FirebaseFirestore.instance
+          .collection('Users')
+          .doc(userId)
+          .get();
+      
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
+        final username = userData['username'] ?? userData['name'] ?? userData['displayName'];
+        if (username != null && username.isNotEmpty) {
+          return username;
+        }
+      }
+      
+      // Fallback to other collections if not found in Users
+      final adminDoc = await FirebaseFirestore.instance
+          .collection('Admins')
+          .doc(userId)
+          .get();
+      
+      if (adminDoc.exists) {
+        final adminData = adminDoc.data()!;
+        final username = adminData['username'] ?? adminData['name'] ?? adminData['displayName'];
+        if (username != null && username.isNotEmpty) {
+          return username;
+        }
+      }
+      
+      final techDoc = await FirebaseFirestore.instance
+          .collection('Technicians')
+          .doc(userId)
+          .get();
+      
+      if (techDoc.exists) {
+        final techData = techDoc.data()!;
+        final username = techData['username'] ?? techData['name'] ?? techData['displayName'];
+        if (username != null && username.isNotEmpty) {
+          return username;
+        }
+      }
+      
+      final devDoc = await FirebaseFirestore.instance
+          .collection('Developers')
+          .doc(userId)
+          .get();
+      
+      if (devDoc.exists) {
+        final devData = devDoc.data()!;
+        final username = devData['username'] ?? devData['name'] ?? devData['displayName'];
+        if (username != null && username.isNotEmpty) {
+          return username;
+        }
+      }
+      
+      // Final fallback to email from Firebase Auth
+      final user = await FirebaseAuth.instance.userChanges().first;
+      if (user != null && user.uid == userId) {
+        return user.email ?? 'Unknown User';
+      }
+      
+      return 'Unknown User';
+    } catch (e) {
+      _logger.e('Error fetching username for user $userId: $e');
+      return 'Unknown User';
+    }
+  }
+
+  // Add this method to fetch request title
+  Future<String> _getRequestTitleFromId(String requestId) async {
+    try {
+      final requestDoc = await FirebaseFirestore.instance
+          .collection('Work_Requests')
+          .doc(requestId)
+          .get();
+      
+      if (requestDoc.exists) {
+        final requestData = requestDoc.data()!;
+        final title = requestData['title'] ?? 'Untitled Request';
+        return '$title (ID: $requestId)';
+      }
+      
+      return 'Request ID: $requestId';
+    } catch (e) {
+      _logger.e('Error fetching request title for $requestId: $e');
+      return 'Request ID: $requestId';
+    }
+  }
+
   Future<void> _addWorkOrder() async {
     if (_formKey.currentState!.validate()) {
-      if (_isSubmitting) return; // Prevent double submission
+      if (_isSubmitting) return;
       
       setState(() {
         _isSubmitting = true;
@@ -178,13 +299,13 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
               'notes': _notesController.text,
               'userId': user.uid,
               'userEmail': _createdByEmail,
+              'username': _createdByUsername ?? _createdByEmail ?? 'Unknown User',
             }
           ],
           clientStatus: 'To be Reviewed',
           clientNotes: '',
         );
 
-        // Save to top-level Work_Orders collection
         await FirebaseFirestore.instance
             .collection('Work_Orders')
             .doc(workOrderId)
@@ -243,7 +364,6 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
           imageQuality: 85,
         );
       } else {
-        // Show source selection for mobile
         final ImageSource? source = await showDialog<ImageSource>(
           context: context,
           builder: (context) => AlertDialog(
@@ -294,7 +414,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'docx', 'doc', 'txt'],
-        withData: true, // Always get bytes for cross-platform compatibility
+        withData: true,
       );
       
       if (result == null || result.files.isEmpty) {
@@ -305,11 +425,9 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
       final platformFile = result.files.single;
       Uint8List? fileBytes;
       
-      // Always use bytes for cross-platform compatibility
       if (platformFile.bytes != null) {
         fileBytes = platformFile.bytes!;
       } else {
-        // Fallback for mobile platforms
         if (!kIsWeb && platformFile.path != null) {
           final file = File(platformFile.path!);
           fileBytes = await file.readAsBytes();
@@ -377,7 +495,6 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
 
     if (!mounted) return;
 
-    // Show upload progress dialog
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -642,6 +759,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
             'notes': notes,
             'userId': user.uid,
             'userEmail': _createdByEmail,
+            'username': _createdByUsername ?? _createdByEmail ?? 'Unknown User',
           }
         ]),
       });
@@ -670,6 +788,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
             'notes': notes,
             'userId': user.uid,
             'userEmail': _createdByEmail,
+            'username': _createdByUsername ?? _createdByEmail ?? 'Unknown User',
           }
         ]),
       });
@@ -680,14 +799,14 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     }
   }
 
-  // Fixed: Update status counts without causing rebuilds
-  void _updateStatusCounts(List<QueryDocumentSnapshot> docs) {
-    final newAllCount = docs.length;
+  // Update client status counts from all work orders
+  void _updateClientStatusCounts(List<QueryDocumentSnapshot> allDocs) {
+    final newAllCount = allDocs.length;
     int newApprovedCount = 0;
     int newDeclinedCount = 0;
     int newToBeReviewedCount = 0;
 
-    for (var doc in docs) {
+    for (var doc in allDocs) {
       final data = doc.data() as Map<String, dynamic>;
       final clientStatus = data['clientStatus'] ?? 'To be Reviewed';
       switch (clientStatus) {
@@ -722,10 +841,127 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     }
   }
 
+  // Update priority counts from all work orders
+  void _updatePriorityCounts(List<QueryDocumentSnapshot> allDocs) {
+    final newAllPriorityCount = allDocs.length;
+    int newHighPriorityCount = 0;
+    int newMediumPriorityCount = 0;
+    int newLowPriorityCount = 0;
+
+    for (var doc in allDocs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final priority = data['priority'] ?? 'Medium';
+      switch (priority) {
+        case 'High':
+          newHighPriorityCount++;
+          break;
+        case 'Medium':
+          newMediumPriorityCount++;
+          break;
+        case 'Low':
+          newLowPriorityCount++;
+          break;
+      }
+    }
+
+    // Only update if counts actually changed
+    if (_allPriorityCount != newAllPriorityCount || 
+        _highPriorityCount != newHighPriorityCount || 
+        _mediumPriorityCount != newMediumPriorityCount || 
+        _lowPriorityCount != newLowPriorityCount) {
+      
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _allPriorityCount = newAllPriorityCount;
+            _highPriorityCount = newHighPriorityCount;
+            _mediumPriorityCount = newMediumPriorityCount;
+            _lowPriorityCount = newLowPriorityCount;
+          });
+        }
+      });
+    }
+  }
+
+  // Update work order status counts for approved items
+  void _updateWorkOrderStatusCounts(List<QueryDocumentSnapshot> approvedDocs) {
+    final newApprovedAllCount = approvedDocs.length;
+    int newApprovedOpenCount = 0;
+    int newApprovedInProgressCount = 0;
+    int newApprovedCompletedCount = 0;
+
+    for (var doc in approvedDocs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final status = data['status'] ?? 'Open';
+      switch (status) {
+        case 'Open':
+          newApprovedOpenCount++;
+          break;
+        case 'In Progress':
+          newApprovedInProgressCount++;
+          break;
+        case 'Completed':
+          newApprovedCompletedCount++;
+          break;
+      }
+    }
+
+    // Only update if counts actually changed
+    if (_approvedAllCount != newApprovedAllCount || 
+        _approvedOpenCount != newApprovedOpenCount || 
+        _approvedInProgressCount != newApprovedInProgressCount || 
+        _approvedCompletedCount != newApprovedCompletedCount) {
+      
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _approvedAllCount = newApprovedAllCount;
+            _approvedOpenCount = newApprovedOpenCount;
+            _approvedInProgressCount = newApprovedInProgressCount;
+            _approvedCompletedCount = newApprovedCompletedCount;
+          });
+        }
+      });
+    }
+  }
+
+  // Get filtered work orders from cached data
+  List<QueryDocumentSnapshot> _getFilteredWorkOrders() {
+    if (_isInApprovedSubView) {
+      // Filter approved work orders by work order status
+      final approvedDocs = _allWorkOrders.where((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return data['clientStatus'] == 'Approved';
+      }).toList();
+      
+      if (_workOrderStatusFilter != 'All') {
+        return approvedDocs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return data['status'] == _workOrderStatusFilter;
+        }).toList();
+      }
+      return approvedDocs;
+    } else if (_isClientStatusFilterMode && _statusFilter != 'All') {
+      return _allWorkOrders.where((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return data['clientStatus'] == _statusFilter;
+      }).toList();
+    } else if (!_isClientStatusFilterMode && _priorityFilter != 'All') {
+      return _allWorkOrders.where((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return data['priority'] == _priorityFilter;
+      }).toList();
+    }
+    return _allWorkOrders;
+  }
+
   void _showSnackBar(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message, style: GoogleFonts.poppins())),
+        SnackBar(
+          content: Text(message, style: GoogleFonts.poppins()),
+          duration: const Duration(seconds: 3),
+        ),
       );
     }
   }
@@ -766,7 +1002,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Status filter tabs - Fixed position
+          // Enhanced filter tabs with back navigation
           Container(
             padding: EdgeInsets.all(padding),
             decoration: BoxDecoration(
@@ -776,16 +1012,85 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Filter by Client Status:',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w500,
-                    color: Colors.blueGrey[800],
-                    fontSize: fontSizeSubtitle,
+                // Back button for approved sub-view
+                if (_isInApprovedSubView) ...[
+                  Row(
+                    children: [
+                      IconButton(
+                        onPressed: () {
+                          setState(() {
+                            _isInApprovedSubView = false;
+                            _workOrderStatusFilter = 'All';
+                          });
+                        },
+                        icon: const Icon(Icons.arrow_back, color: Colors.blueGrey),
+                      ),
+                      Text(
+                        'Approved Work Orders by Status',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w500,
+                          color: Colors.blueGrey[800],
+                          fontSize: fontSizeSubtitle,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                _buildResponsiveTabBar(isMobile, isTablet),
+                  const SizedBox(height: 12),
+                  _buildWorkOrderStatusTabBar(isMobile, isTablet),
+                ] else ...[
+                  // Main filter mode controls
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _isClientStatusFilterMode ? 'Filter by Client Status:' : 'Filter by Priority:',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w500,
+                          color: Colors.blueGrey[800],
+                          fontSize: fontSizeSubtitle,
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _isClientStatusFilterMode = !_isClientStatusFilterMode;
+                            // Reset filters when switching modes
+                            _statusFilter = 'All';
+                            _priorityFilter = 'All';
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.blueGrey[600],
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.swap_horiz,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _isClientStatusFilterMode ? 'Switch to Priority' : 'Switch to Status',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildResponsiveTabBar(isMobile, isTablet),
+                ],
               ],
             ),
           ),
@@ -800,45 +1105,177 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
   }
 
   Widget _buildResponsiveTabBar(bool isMobile, bool isTablet) {
+    if (_isClientStatusFilterMode) {
+      // Client status filter tabs
+      if (isMobile) {
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _buildTabButton('All', _allCount, Colors.grey, 0, true),
+              const SizedBox(width: 8),
+              _buildTabButton('Approved', _approvedCount, Colors.green, 1, true),
+              const SizedBox(width: 8),
+              _buildTabButton('Declined', _declinedCount, Colors.red, 2, true),
+              const SizedBox(width: 8),
+              _buildTabButton('To be Reviewed', _toBeReviewedCount, Colors.orange, 3, true),
+            ],
+          ),
+        );
+      } else {
+        return Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            _buildTabButton('All', _allCount, Colors.grey, 0, true),
+            _buildTabButton('Approved', _approvedCount, Colors.green, 1, true),
+            _buildTabButton('Declined', _declinedCount, Colors.red, 2, true),
+            _buildTabButton('To be Reviewed', _toBeReviewedCount, Colors.orange, 3, true),
+          ],
+        );
+      }
+    } else {
+      // Priority filter tabs
+      if (isMobile) {
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _buildTabButton('All', _allPriorityCount, Colors.grey, 0, false),
+              const SizedBox(width: 8),
+              _buildTabButton('High', _highPriorityCount, Colors.red, 1, false),
+              const SizedBox(width: 8),
+              _buildTabButton('Medium', _mediumPriorityCount, Colors.orange, 2, false),
+              const SizedBox(width: 8),
+              _buildTabButton('Low', _lowPriorityCount, Colors.green, 3, false),
+            ],
+          ),
+        );
+      } else {
+        return Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            _buildTabButton('All', _allPriorityCount, Colors.grey, 0, false),
+            _buildTabButton('High', _highPriorityCount, Colors.red, 1, false),
+            _buildTabButton('Medium', _mediumPriorityCount, Colors.orange, 2, false),
+            _buildTabButton('Low', _lowPriorityCount, Colors.green, 3, false),
+          ],
+        );
+      }
+    }
+  }
+
+  Widget _buildWorkOrderStatusTabBar(bool isMobile, bool isTablet) {
     if (isMobile) {
-      // For mobile, use horizontal scrollable tabs
       return SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            _buildTabButton('All', _allCount, Colors.grey, 0),
+            _buildWorkOrderStatusTabButton('All', _approvedAllCount, Colors.grey, 0),
             const SizedBox(width: 8),
-            _buildTabButton('Approved', _approvedCount, Colors.green, 1),
+            _buildWorkOrderStatusTabButton('Open', _approvedOpenCount, Colors.blue, 1),
             const SizedBox(width: 8),
-            _buildTabButton('Declined', _declinedCount, Colors.red, 2),
+            _buildWorkOrderStatusTabButton('In Progress', _approvedInProgressCount, Colors.orange, 2),
             const SizedBox(width: 8),
-            _buildTabButton('To be Reviewed', _toBeReviewedCount, Colors.orange, 3),
+            _buildWorkOrderStatusTabButton('Completed', _approvedCompletedCount, Colors.green, 3),
           ],
         ),
       );
     } else {
-      // For tablet and desktop, use grid layout
       return Wrap(
         spacing: 12,
         runSpacing: 8,
         children: [
-          _buildTabButton('All', _allCount, Colors.grey, 0),
-          _buildTabButton('Approved', _approvedCount, Colors.green, 1),
-          _buildTabButton('Declined', _declinedCount, Colors.red, 2),
-          _buildTabButton('To be Reviewed', _toBeReviewedCount, Colors.orange, 3),
+          _buildWorkOrderStatusTabButton('All', _approvedAllCount, Colors.grey, 0),
+          _buildWorkOrderStatusTabButton('Open', _approvedOpenCount, Colors.blue, 1),
+          _buildWorkOrderStatusTabButton('In Progress', _approvedInProgressCount, Colors.orange, 2),
+          _buildWorkOrderStatusTabButton('Completed', _approvedCompletedCount, Colors.green, 3),
         ],
       );
     }
   }
 
-  Widget _buildTabButton(String label, int count, Color color, int index) {
-    final statuses = ['All', 'Approved', 'Declined', 'To be Reviewed'];
-    final isSelected = _statusFilter == statuses[index];
+  Widget _buildTabButton(String label, int count, Color color, int index, bool isStatusMode) {
+    final isSelected = isStatusMode 
+        ? _statusFilter == (index == 0 ? 'All' : ['Approved', 'Declined', 'To be Reviewed'][index - 1])
+        : _priorityFilter == (index == 0 ? 'All' : ['High', 'Medium', 'Low'][index - 1]);
     
     return GestureDetector(
       onTap: () {
         setState(() {
-          _statusFilter = statuses[index];
+          if (isStatusMode) {
+            final newFilter = index == 0 ? 'All' : ['Approved', 'Declined', 'To be Reviewed'][index - 1];
+            _statusFilter = newFilter;
+            
+            // Enter approved sub-view if Approved is selected
+            if (newFilter == 'Approved') {
+              _isInApprovedSubView = true;
+              _workOrderStatusFilter = 'All';
+            }
+          } else {
+            _priorityFilter = index == 0 ? 'All' : ['High', 'Medium', 'Low'][index - 1];
+          }
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: isSelected ? color : Colors.white,
+          border: Border.all(
+            color: color.withValues(alpha: 0.5),
+            width: isSelected ? 2 : 1,
+          ),
+          boxShadow: isSelected ? [
+            BoxShadow(
+              color: color.withValues(alpha: 0.3),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ] : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w500,
+                color: isSelected ? Colors.white : color,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.white.withValues(alpha: 0.2) : color,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                count.toString(),
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkOrderStatusTabButton(String label, int count, Color color, int index) {
+    final statuses = ['All', 'Open', 'In Progress', 'Completed'];
+    final isSelected = _workOrderStatusFilter == statuses[index];
+    
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _workOrderStatusFilter = statuses[index];
         });
       },
       child: Container(
@@ -893,9 +1330,13 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
 
   Widget _buildWorkOrdersList(double padding, double fontSizeSubtitle, bool isMobile) {
     return StreamBuilder<QuerySnapshot>(
-      stream: _buildWorkOrdersStream(),
+      stream: FirebaseFirestore.instance
+          .collection('Work_Orders')
+          .where('facilityId', isEqualTo: widget.facilityId)
+          .orderBy('createdAt', descending: true)
+          .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting && _isLoading) {
           return const Center(
             child: Padding(
               padding: EdgeInsets.all(32.0),
@@ -948,12 +1389,43 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
           );
         }
         
-        final docs = snapshot.data!.docs;
+        // Cache all work orders for better performance
+        _allWorkOrders = snapshot.data!.docs;
+        _isLoading = false;
         
-        // Update status counts
-        _updateStatusCounts(docs);
+        // Update counts based on all work orders (not filtered)
+        if (_isClientStatusFilterMode) {
+          _updateClientStatusCounts(_allWorkOrders);
+        } else {
+          _updatePriorityCounts(_allWorkOrders);
+        }
 
-        if (docs.isEmpty) {
+        // Update work order status counts for approved items
+        final approvedDocs = _allWorkOrders.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return data['clientStatus'] == 'Approved';
+        }).toList();
+        _updateWorkOrderStatusCounts(approvedDocs);
+
+        // Get filtered work orders
+        final filteredWorkOrders = _getFilteredWorkOrders();
+
+        if (filteredWorkOrders.isEmpty) {
+          String filterText;
+          if (_isInApprovedSubView) {
+            filterText = _workOrderStatusFilter == 'All' 
+                ? 'No approved work orders found' 
+                : 'No $_workOrderStatusFilter approved work orders';
+          } else if (_isClientStatusFilterMode) {
+            filterText = _statusFilter == 'All' 
+                ? 'No work orders found' 
+                : 'No $_statusFilter work orders';
+          } else {
+            filterText = _priorityFilter == 'All' 
+                ? 'No work orders found' 
+                : 'No $_priorityFilter priority work orders';
+          }
+          
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(32.0),
@@ -966,7 +1438,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    _statusFilter == 'All' ? 'No work orders found' : 'No $_statusFilter work orders',
+                    filterText,
                     style: GoogleFonts.poppins(
                       fontSize: fontSizeSubtitle,
                       color: Colors.grey[600],
@@ -992,27 +1464,15 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
         return ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: docs.length,
+          itemCount: filteredWorkOrders.length,
           itemBuilder: (context, index) {
-            final data = docs[index].data() as Map<String, dynamic>;
-            final workOrder = WorkOrder.fromMap(data, docs[index].id);
+            final data = filteredWorkOrders[index].data() as Map<String, dynamic>;
+            final workOrder = WorkOrder.fromMap(data, filteredWorkOrders[index].id);
             return _buildWorkOrderCard(workOrder, fontSizeSubtitle, isMobile);
           },
         );
       },
     );
-  }
-
-  Stream<QuerySnapshot> _buildWorkOrdersStream() {
-    Query query = FirebaseFirestore.instance
-        .collection('Work_Orders')
-        .where('facilityId', isEqualTo: widget.facilityId);
-    
-    if (_statusFilter != 'All') {
-      query = query.where('clientStatus', isEqualTo: _statusFilter);
-    }
-    
-    return query.orderBy('createdAt', descending: true).snapshots();
   }
 
   Widget _buildWorkOrderCard(WorkOrder workOrder, double fontSize, bool isMobile) {
@@ -1077,10 +1537,34 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
             ),
             const SizedBox(height: 12),
             _buildDetailRow('Description', workOrder.description, fontSize, isMobile),
-            _buildDetailRow('Assigned To', workOrder.assignedToEmail.isNotEmpty ? workOrder.assignedToEmail : 'Unassigned', fontSize, isMobile),
-            _buildDetailRow('Created By', workOrder.createdByEmail, fontSize, isMobile),
+            // Use FutureBuilder to fetch username for Assigned To
+            if (workOrder.assignedTo.isNotEmpty)
+              FutureBuilder<String>(
+                future: _getUsernameFromCollection(workOrder.assignedTo),
+                builder: (context, snapshot) {
+                  final displayName = snapshot.data ?? (workOrder.assignedToEmail.isNotEmpty ? workOrder.assignedToEmail : 'Loading...');
+                  return _buildDetailRow('Assigned To', displayName, fontSize, isMobile);
+                },
+              ),
+            if (workOrder.assignedTo.isEmpty)
+              _buildDetailRow('Assigned To', 'Unassigned', fontSize, isMobile),
+            // Use FutureBuilder to fetch username for Created By
+            FutureBuilder<String>(
+              future: _getUsernameFromCollection(workOrder.createdBy),
+              builder: (context, snapshot) {
+                final displayName = snapshot.data ?? (workOrder.createdByEmail.isNotEmpty ? workOrder.createdByEmail : 'Loading...');
+                return _buildDetailRow('Created By', displayName, fontSize, isMobile);
+              },
+            ),
+            // Use FutureBuilder to fetch request title for Related Request
             if (workOrder.requestId != null)
-              _buildDetailRow('Related Request', workOrder.requestId!, fontSize, isMobile),
+              FutureBuilder<String>(
+                future: _getRequestTitleFromId(workOrder.requestId!),
+                builder: (context, snapshot) {
+                  final displayTitle = snapshot.data ?? 'Loading request...';
+                  return _buildDetailRow('Related Request', displayTitle, fontSize, isMobile);
+                },
+              ),
             if (workOrder.clientNotes.isNotEmpty)
               _buildDetailRow('Client Notes', workOrder.clientNotes, fontSize, isMobile),
             if (workOrder.attachments.isNotEmpty)
@@ -1247,12 +1731,21 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
                       entry['action'] ?? 'Action',
                       style: GoogleFonts.poppins(fontSize: fontSize - 2, fontWeight: FontWeight.w500),
                     ),
-                    Text(
-                      'by ${entry['userEmail'] ?? entry['userId'] ?? 'Unknown'} at ${entry['timestamp'] != null ? DateFormat.yMMMd().format((entry['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
-                      style: GoogleFonts.poppins(
-                        fontSize: fontSize - 4,
-                        color: Colors.grey[600],
-                      ),
+                    // Use FutureBuilder to fetch username for each history entry
+                    FutureBuilder<String>(
+                      future: entry['userId'] != null && entry['userId'] != 'system' 
+                          ? _getUsernameFromCollection(entry['userId'])
+                          : Future.value(entry['username'] ?? entry['userEmail'] ?? 'Unknown'),
+                      builder: (context, snapshot) {
+                        final displayName = snapshot.data ?? 'Loading...';
+                        return Text(
+                          'by $displayName at ${entry['timestamp'] != null ? DateFormat.yMMMd().format((entry['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
+                          style: GoogleFonts.poppins(
+                            fontSize: fontSize - 4,
+                            color: Colors.grey[600],
+                          ),
+                        );
+                      },
                     ),
                     if (entry['notes'] != null && entry['notes'].isNotEmpty)
                       Text(
@@ -1786,7 +2279,13 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
                   _buildDetailRow('Description', request.description, 14, false),
                   _buildDetailRow('Priority', request.priority, 14, false),
                   _buildDetailRow('Status', request.status, 14, false),
-                  _buildDetailRow('Created By', request.createdByEmail ?? request.createdBy, 14, false),
+                  FutureBuilder<String>(
+                    future: _getUsernameFromCollection(request.createdBy),
+                    builder: (context, snapshot) {
+                      final displayName = snapshot.data ?? (request.createdByEmail ?? 'Loading...');
+                      return _buildDetailRow('Created By', displayName, 14, false);
+                    },
+                  ),
                   _buildDetailRow('Created', request.createdAt != null ? DateFormat.yMMMd().format(request.createdAt!) : 'Unknown', 14, false),
                   if (request.attachments.isNotEmpty)
                     _buildAttachmentsSection(request.attachments, 14),
