@@ -37,27 +37,41 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
   
   String _priority = 'Medium';
   String _statusFilter = 'All';
+  String _priorityFilter = 'All';
+  bool _isStatusFilterMode = true;
   final List<Map<String, String>> _attachmentUrls = [];
   bool _showForm = false;
   String _currentRole = 'User';
   String _organization = '-';
   bool _isClient = false;
   String? _createdByEmail;
+  String? _createdByUsername;
   double? _uploadProgress;
   late TabController _tabController;
   bool _isSubmitting = false;
 
-  // Status counts for tabs - using individual variables to prevent rebuild issues
+  // Status counts for tabs - Fixed to maintain counts during filtering
   int _allCount = 0;
   int _openCount = 0;
   int _inProgressCount = 0;
   int _closedCount = 0;
+
+  // Priority counts for tabs
+  int _allPriorityCount = 0;
+  int _highPriorityCount = 0;
+  int _mediumPriorityCount = 0;
+  int _lowPriorityCount = 0;
+
+  // Cache for all requests to avoid repeated queries
+  List<QueryDocumentSnapshot> _allRequests = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
     _getCurrentUserInfo();
+    _setupAutomaticStatusUpdates();
     _logger.i('RequestScreen initialized: facilityId=${widget.facilityId}');
   }
 
@@ -83,26 +97,34 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
       String newRole = 'User';
       String newOrg = '-';
       String? email = user.email;
+      String? username;
       bool isClient = false;
 
       if (adminDoc.exists) {
         newRole = 'Admin';
-        newOrg = adminDoc.data()?['organization'] ?? '-';
+        final data = adminDoc.data()!;
+        newOrg = data['organization'] ?? '-';
+        username = data['username'] ?? data['name'] ?? data['displayName'];
       } else if (developerDoc.exists) {
         newRole = 'Technician';
         newOrg = 'JV Almacis';
+        final data = developerDoc.data()!;
+        username = data['username'] ?? data['name'] ?? data['displayName'];
       } else if (technicianDoc.exists) {
         newRole = 'Technician';
-        newOrg = technicianDoc.data()?['organization'] ?? '-';
+        final data = technicianDoc.data()!;
+        newOrg = data['organization'] ?? '-';
+        username = data['username'] ?? data['name'] ?? data['displayName'];
       } else if (userDoc.exists) {
-        final userData = userDoc.data();
-        if (userData != null && userData['role'] == 'Technician') {
+        final userData = userDoc.data()!;
+        if (userData['role'] == 'Technician') {
           newRole = 'Technician';
           newOrg = userData['organization'] ?? '-';
         } else {
           newRole = 'User';
-          newOrg = userData?['organization'] ?? '-';
+          newOrg = userData['organization'] ?? '-';
         }
+        username = userData['username'] ?? userData['name'] ?? userData['displayName'];
       }
 
       // Determine if user is client (organization != 'JV Almacis')
@@ -114,17 +136,221 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
           _organization = newOrg;
           _isClient = isClient;
           _createdByEmail = email;
+          _createdByUsername = username;
         });
-        _logger.i('Updated client status for Work Requests: isClient=$isClient, org=$newOrg');
+        _logger.i('Updated client status for Work Requests: isClient=$isClient, org=$newOrg, username=$username');
       }
     } catch (e) {
       _logger.e('Error getting user info: $e');
     }
   }
 
+  // Add this method after _getCurrentUserInfo()
+  Future<String> _getUsernameFromCollection(String userId) async {
+    try {
+      // Check Users collection first
+      final userDoc = await FirebaseFirestore.instance
+          .collection('Users')
+          .doc(userId)
+          .get();
+      
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
+        final username = userData['username'] ?? userData['name'] ?? userData['displayName'];
+        if (username != null && username.isNotEmpty) {
+          return username;
+        }
+      }
+      
+      // Fallback to other collections if not found in Users
+      final adminDoc = await FirebaseFirestore.instance
+          .collection('Admins')
+          .doc(userId)
+          .get();
+      
+      if (adminDoc.exists) {
+        final adminData = adminDoc.data()!;
+        final username = adminData['username'] ?? adminData['name'] ?? adminData['displayName'];
+        if (username != null && username.isNotEmpty) {
+          return username;
+        }
+      }
+      
+      final techDoc = await FirebaseFirestore.instance
+          .collection('Technicians')
+          .doc(userId)
+          .get();
+      
+      if (techDoc.exists) {
+        final techData = techDoc.data()!;
+        final username = techData['username'] ?? techData['name'] ?? techData['displayName'];
+        if (username != null && username.isNotEmpty) {
+          return username;
+        }
+      }
+      
+      final devDoc = await FirebaseFirestore.instance
+          .collection('Developers')
+          .doc(userId)
+          .get();
+      
+      if (devDoc.exists) {
+        final devData = devDoc.data()!;
+        final username = devData['username'] ?? devData['name'] ?? devData['displayName'];
+        if (username != null && username.isNotEmpty) {
+          return username;
+        }
+      }
+      
+      // Final fallback to email from Firebase Auth
+      final user = await FirebaseAuth.instance.userChanges().first;
+      if (user != null && user.uid == userId) {
+        return user.email ?? 'Unknown User';
+      }
+      
+      return 'Unknown User';
+    } catch (e) {
+      _logger.e('Error fetching username for user $userId: $e');
+      return 'Unknown User';
+    }
+  }
+
+  // Enhanced automatic status update system
+  void _setupAutomaticStatusUpdates() {
+    // Listen to work orders changes to update request statuses
+    FirebaseFirestore.instance
+        .collection('Work_Orders')
+        .where('facilityId', isEqualTo: widget.facilityId)
+        .snapshots()
+        .listen((snapshot) {
+      _processWorkOrderChanges(snapshot);
+    });
+
+    // Also listen to requests to update statuses based on work order existence
+    FirebaseFirestore.instance
+        .collection('Work_Requests')
+        .where('facilityId', isEqualTo: widget.facilityId)
+        .snapshots()
+        .listen((snapshot) {
+      _processRequestStatusUpdates(snapshot);
+    });
+  }
+
+  Future<void> _processWorkOrderChanges(QuerySnapshot workOrderSnapshot) async {
+    for (var change in workOrderSnapshot.docChanges) {
+      if (change.type == DocumentChangeType.modified || change.type == DocumentChangeType.added) {
+        final data = change.doc.data() as Map<String, dynamic>;
+        final workOrderStatus = data['status'];
+        final requestId = data['requestId'];
+        
+        if (requestId != null) {
+          await _updateRequestStatusBasedOnWorkOrder(requestId, workOrderStatus);
+        }
+      }
+    }
+  }
+
+  Future<void> _processRequestStatusUpdates(QuerySnapshot requestSnapshot) async {
+    for (var doc in requestSnapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final requestId = doc.id;
+      final workOrderIds = List<String>.from(data['workOrderIds'] ?? []);
+      
+      await _updateRequestStatusBasedOnWorkOrders(requestId, workOrderIds);
+    }
+  }
+
+  Future<void> _updateRequestStatusBasedOnWorkOrder(String requestId, String workOrderStatus) async {
+  try {
+    String newRequestStatus;
+    
+    switch (workOrderStatus) {
+      case 'Completed':
+        newRequestStatus = 'Closed';
+        break;
+      case 'Open':
+      case 'In Progress':
+        newRequestStatus = 'In Progress';
+        break;
+      default:
+        return; // Don't update for other statuses
+    }
+
+    // Update status ONLY - no comments added
+    await FirebaseFirestore.instance
+        .collection('Work_Requests')
+        .doc(requestId)
+        .update({'status': newRequestStatus});
+    
+    _logger.i('Request $requestId status updated to $newRequestStatus based on work order status: $workOrderStatus');
+  } catch (e) {
+    _logger.e('Error updating request status: $e');
+  }
+}
+
+  Future<void> _updateRequestStatusBasedOnWorkOrders(String requestId, List<String> workOrderIds) async {
+    try {
+      String newStatus;
+      
+      if (workOrderIds.isEmpty) {
+        newStatus = 'Open';
+      } else {
+        // Check work order statuses
+        final workOrdersQuery = await FirebaseFirestore.instance
+            .collection('Work_Orders')
+            .where('requestId', isEqualTo: requestId)
+            .get();
+        
+        if (workOrdersQuery.docs.isEmpty) {
+          newStatus = 'Open';
+        } else {
+          bool hasCompleted = false;
+          bool hasInProgress = false;
+          
+          for (var doc in workOrdersQuery.docs) {
+            final status = doc.data()['status'] ?? 'Open';
+            if (status == 'Completed') {
+              hasCompleted = true;
+            } else if (status == 'In Progress' || status == 'Open') {
+              hasInProgress = true;
+            }
+          }
+          
+          if (hasCompleted && !hasInProgress) {
+            newStatus = 'Closed';
+          } else if (hasInProgress || hasCompleted) {
+            newStatus = 'In Progress';
+          } else {
+            newStatus = 'Open';
+          }
+        }
+      }
+
+      // Only update if status actually changed
+      final currentDoc = await FirebaseFirestore.instance
+          .collection('Work_Requests')
+          .doc(requestId)
+          .get();
+      
+      if (currentDoc.exists) {
+        final currentStatus = currentDoc.data()?['status'] ?? 'Open';
+        if (currentStatus != newStatus) {
+          await FirebaseFirestore.instance
+              .collection('Work_Requests')
+              .doc(requestId)
+              .update({'status': newStatus});
+          
+          _logger.i('Request $requestId status updated to $newStatus');
+        }
+      }
+    } catch (e) {
+      _logger.e('Error updating request status based on work orders: $e');
+    }
+  }
+
   Future<void> _addRequest() async {
     if (_formKey.currentState!.validate()) {
-      if (_isSubmitting) return; // Prevent double submission
+      if (_isSubmitting) return;
       
       setState(() {
         _isSubmitting = true;
@@ -148,11 +374,12 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
           requestId: requestId,
           title: _titleController.text,
           description: _descriptionController.text,
-          status: 'Open',
+          status: 'Open', // Always start as Open
           priority: _priority,
           createdAt: DateTime.now(),
           createdBy: user.uid,
           createdByEmail: _createdByEmail,
+          createdByUsername: _createdByUsername,
           facilityId: widget.facilityId,
           attachments: List<Map<String, String>>.from(_attachmentUrls),
           comments: [
@@ -163,13 +390,13 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
                 'comment': _notesController.text,
                 'userId': user.uid,
                 'userEmail': _createdByEmail,
+                'username': _createdByUsername ?? _createdByEmail ?? 'Unknown User',
               }
           ],
           workOrderIds: [],
           clientStatus: 'Pending',
         );
 
-        // Use batch write to ensure atomicity
         final batch = FirebaseFirestore.instance.batch();
         final docRef = FirebaseFirestore.instance.collection('Work_Requests').doc(requestId);
         
@@ -214,7 +441,6 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
           imageQuality: 85,
         );
       } else {
-        // Show source selection for mobile
         final ImageSource? source = await showDialog<ImageSource>(
           context: context,
           builder: (context) => AlertDialog(
@@ -265,7 +491,7 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'docx', 'doc', 'txt'],
-        withData: true, // Always get bytes for cross-platform compatibility
+        withData: true,
       );
       
       if (result == null || result.files.isEmpty) {
@@ -276,11 +502,9 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
       final platformFile = result.files.single;
       Uint8List? fileBytes;
       
-      // Always use bytes for cross-platform compatibility
       if (platformFile.bytes != null) {
         fileBytes = platformFile.bytes!;
       } else {
-        // Fallback for mobile platforms
         if (!kIsWeb && platformFile.path != null) {
           final file = File(platformFile.path!);
           fileBytes = await file.readAsBytes();
@@ -348,7 +572,6 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
 
     if (!mounted) return;
 
-    // Show upload progress dialog
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -593,49 +816,14 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
     return true;
   }
 
-  Future<void> _updateStatus(String docId, String newStatus, String comment) async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
-      _logger.i('Updating status: docId=$docId, newStatus=$newStatus');
-      
-      final updateData = <String, dynamic>{
-        'status': newStatus,
-      };
-      
-      if (comment.isNotEmpty) {
-        updateData['comments'] = FieldValue.arrayUnion([
-          {
-            'action': 'Status changed to $newStatus',
-            'timestamp': Timestamp.now(),
-            'comment': comment,
-            'userId': user.uid,
-            'userEmail': _createdByEmail,
-          }
-        ]);
-      }
-      
-      await FirebaseFirestore.instance
-          .collection('Work_Requests')
-          .doc(docId)
-          .update(updateData);
-          
-      if (mounted) _showSnackBar('Status updated to $newStatus');
-    } catch (e) {
-      _logger.e('Error updating status: $e');
-      if (mounted) _showSnackBar('Error updating status: $e');
-    }
-  }
-
-  // Fixed: Update status counts without causing rebuilds
-  void _updateStatusCounts(List<QueryDocumentSnapshot> docs) {
-    final newAllCount = docs.length;
+  // Fixed: Update status counts from all requests, not filtered ones
+  void _updateStatusCounts(List<QueryDocumentSnapshot> allDocs) {
+    final newAllCount = allDocs.length;
     int newOpenCount = 0;
     int newInProgressCount = 0;
     int newClosedCount = 0;
 
-    for (var doc in docs) {
+    for (var doc in allDocs) {
       final data = doc.data() as Map<String, dynamic>;
       final status = data['status'] ?? 'Open';
       switch (status) {
@@ -668,6 +856,64 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
         }
       });
     }
+  }
+
+  // Update priority counts from all requests, not filtered ones
+  void _updatePriorityCounts(List<QueryDocumentSnapshot> allDocs) {
+    final newAllPriorityCount = allDocs.length;
+    int newHighPriorityCount = 0;
+    int newMediumPriorityCount = 0;
+    int newLowPriorityCount = 0;
+
+    for (var doc in allDocs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final priority = data['priority'] ?? 'Medium';
+      switch (priority) {
+        case 'High':
+          newHighPriorityCount++;
+          break;
+        case 'Medium':
+          newMediumPriorityCount++;
+          break;
+        case 'Low':
+          newLowPriorityCount++;
+          break;
+      }
+    }
+
+    // Only update if counts actually changed
+    if (_allPriorityCount != newAllPriorityCount || 
+        _highPriorityCount != newHighPriorityCount || 
+        _mediumPriorityCount != newMediumPriorityCount || 
+        _lowPriorityCount != newLowPriorityCount) {
+      
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _allPriorityCount = newAllPriorityCount;
+            _highPriorityCount = newHighPriorityCount;
+            _mediumPriorityCount = newMediumPriorityCount;
+            _lowPriorityCount = newLowPriorityCount;
+          });
+        }
+      });
+    }
+  }
+
+  // Get filtered requests from cached data
+  List<QueryDocumentSnapshot> _getFilteredRequests() {
+    if (_isStatusFilterMode && _statusFilter != 'All') {
+      return _allRequests.where((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return data['status'] == _statusFilter;
+      }).toList();
+    } else if (!_isStatusFilterMode && _priorityFilter != 'All') {
+      return _allRequests.where((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return data['priority'] == _priorityFilter;
+      }).toList();
+    }
+    return _allRequests;
   }
 
   void _showSnackBar(String message) {
@@ -717,7 +963,7 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Status filter tabs - Fixed position
+          // Filter tabs with toggle switch
           Container(
             padding: EdgeInsets.all(padding),
             decoration: BoxDecoration(
@@ -727,13 +973,54 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Filter by Status:',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w500,
-                    color: Colors.blueGrey[800],
-                    fontSize: fontSizeSubtitle,
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _isStatusFilterMode ? 'Filter by Status:' : 'Filter by Priority:',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w500,
+                        color: Colors.blueGrey[800],
+                        fontSize: fontSizeSubtitle,
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _isStatusFilterMode = !_isStatusFilterMode;
+                          // Reset filters when switching modes
+                          _statusFilter = 'All';
+                          _priorityFilter = 'All';
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.blueGrey[600],
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _isStatusFilterMode ? Icons.swap_horiz : Icons.swap_horiz,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _isStatusFilterMode ? 'Switch to Priority' : 'Switch to Status',
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 _buildResponsiveTabBar(isMobile, isTablet),
@@ -751,45 +1038,80 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
   }
 
   Widget _buildResponsiveTabBar(bool isMobile, bool isTablet) {
-    if (isMobile) {
-      // For mobile, use horizontal scrollable tabs
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
+    if (_isStatusFilterMode) {
+      // Status filter tabs
+      if (isMobile) {
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _buildTabButton('All', _allCount, Colors.grey, 0, true),
+              const SizedBox(width: 8),
+              _buildTabButton('Open', _openCount, Colors.blue, 1, true),
+              const SizedBox(width: 8),
+              _buildTabButton('In Progress', _inProgressCount, Colors.orange, 2, true),
+              const SizedBox(width: 8),
+              _buildTabButton('Closed', _closedCount, Colors.green, 3, true),
+            ],
+          ),
+        );
+      } else {
+        return Wrap(
+          spacing: 12,
+          runSpacing: 8,
           children: [
-            _buildTabButton('All', _allCount, Colors.grey, 0),
-            const SizedBox(width: 8),
-            _buildTabButton('Open', _openCount, Colors.blue, 1),
-            const SizedBox(width: 8),
-            _buildTabButton('In Progress', _inProgressCount, Colors.orange, 2),
-            const SizedBox(width: 8),
-            _buildTabButton('Closed', _closedCount, Colors.green, 3),
+            _buildTabButton('All', _allCount, Colors.grey, 0, true),
+            _buildTabButton('Open', _openCount, Colors.blue, 1, true),
+            _buildTabButton('In Progress', _inProgressCount, Colors.orange, 2, true),
+            _buildTabButton('Closed', _closedCount, Colors.green, 3, true),
           ],
-        ),
-      );
+        );
+      }
     } else {
-      // For tablet and desktop, use grid layout
-      return Wrap(
-        spacing: 12,
-        runSpacing: 8,
-        children: [
-          _buildTabButton('All', _allCount, Colors.grey, 0),
-          _buildTabButton('Open', _openCount, Colors.blue, 1),
-          _buildTabButton('In Progress', _inProgressCount, Colors.orange, 2),
-          _buildTabButton('Closed', _closedCount, Colors.green, 3),
-        ],
-      );
+      // Priority filter tabs
+      if (isMobile) {
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _buildTabButton('All', _allPriorityCount, Colors.grey, 0, false),
+              const SizedBox(width: 8),
+              _buildTabButton('High', _highPriorityCount, Colors.red, 1, false),
+              const SizedBox(width: 8),
+              _buildTabButton('Medium', _mediumPriorityCount, Colors.orange, 2, false),
+              const SizedBox(width: 8),
+              _buildTabButton('Low', _lowPriorityCount, Colors.green, 3, false),
+            ],
+          ),
+        );
+      } else {
+        return Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            _buildTabButton('All', _allPriorityCount, Colors.grey, 0, false),
+            _buildTabButton('High', _highPriorityCount, Colors.red, 1, false),
+            _buildTabButton('Medium', _mediumPriorityCount, Colors.orange, 2, false),
+            _buildTabButton('Low', _lowPriorityCount, Colors.green, 3, false),
+          ],
+        );
+      }
     }
   }
 
-  Widget _buildTabButton(String label, int count, Color color, int index) {
-    final statuses = ['All', 'Open', 'In Progress', 'Closed'];
-    final isSelected = _statusFilter == statuses[index];
+  Widget _buildTabButton(String label, int count, Color color, int index, bool isStatusMode) {
+    final isSelected = isStatusMode 
+        ? _statusFilter == (index == 0 ? 'All' : ['Open', 'In Progress', 'Closed'][index - 1])
+        : _priorityFilter == (index == 0 ? 'All' : ['High', 'Medium', 'Low'][index - 1]);
     
     return GestureDetector(
       onTap: () {
         setState(() {
-          _statusFilter = statuses[index];
+          if (isStatusMode) {
+            _statusFilter = index == 0 ? 'All' : ['Open', 'In Progress', 'Closed'][index - 1];
+          } else {
+            _priorityFilter = index == 0 ? 'All' : ['High', 'Medium', 'Low'][index - 1];
+          }
         });
       },
       child: Container(
@@ -844,9 +1166,13 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
 
   Widget _buildRequestsList(double padding, double fontSizeSubtitle, bool isMobile) {
     return StreamBuilder<QuerySnapshot>(
-      stream: _buildRequestsStream(),
+      stream: FirebaseFirestore.instance
+          .collection('Work_Requests')
+          .where('facilityId', isEqualTo: widget.facilityId)
+          .orderBy('createdAt', descending: true)
+          .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting && _isLoading) {
           return const Center(
             child: Padding(
               padding: EdgeInsets.all(32.0),
@@ -899,12 +1225,25 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
           );
         }
         
-        final docs = snapshot.data!.docs;
+        // Cache all requests for better performance
+        _allRequests = snapshot.data!.docs;
+        _isLoading = false;
         
-        // Update status counts
-        _updateStatusCounts(docs);
+        // Update counts based on all requests (not filtered)
+        if (_isStatusFilterMode) {
+          _updateStatusCounts(_allRequests);
+        } else {
+          _updatePriorityCounts(_allRequests);
+        }
 
-        if (docs.isEmpty) {
+        // Get filtered requests
+        final filteredRequests = _getFilteredRequests();
+
+        if (filteredRequests.isEmpty) {
+          final filterText = _isStatusFilterMode 
+              ? (_statusFilter == 'All' ? 'No requests found' : 'No $_statusFilter requests')
+              : (_priorityFilter == 'All' ? 'No requests found' : 'No $_priorityFilter priority requests');
+          
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(32.0),
@@ -917,7 +1256,7 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    _statusFilter == 'All' ? 'No requests found' : 'No $_statusFilter requests',
+                    filterText,
                     style: GoogleFonts.poppins(
                       fontSize: fontSizeSubtitle,
                       color: Colors.grey[600],
@@ -943,10 +1282,10 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
         return ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: docs.length,
+          itemCount: filteredRequests.length,
           itemBuilder: (context, index) {
-            final data = docs[index].data() as Map<String, dynamic>;
-            final request = Request.fromMap(data, docs[index].id);
+            final data = filteredRequests[index].data() as Map<String, dynamic>;
+            final request = Request.fromMap(data, filteredRequests[index].id);
             return _buildRequestCard(request, fontSizeSubtitle, isMobile);
           },
         );
@@ -954,94 +1293,87 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
     );
   }
 
-  Stream<QuerySnapshot> _buildRequestsStream() {
-    Query query = FirebaseFirestore.instance
-        .collection('Work_Requests')
-        .where('facilityId', isEqualTo: widget.facilityId);
-    
-    if (_statusFilter != 'All') {
-      query = query.where('status', isEqualTo: _statusFilter);
-    }
-    
-    return query.orderBy('createdAt', descending: true).snapshots();
-  }
-
   Widget _buildRequestCard(Request request, double fontSize, bool isMobile) {
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: _getStatusColor(request.status),
-                  child: Icon(
-                    _getStatusIcon(request.status),
-                    color: Colors.white,
-                    size: 20,
-                  ),
+  return Card(
+    elevation: 4,
+    margin: const EdgeInsets.only(bottom: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    child: Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: _getStatusColor(request.status),
+                child: Icon(
+                  _getStatusIcon(request.status),
+                  color: Colors.white,
+                  size: 20,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        request.title,
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600,
-                          color: Colors.blueGrey[900],
-                          fontSize: fontSize,
-                        ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      request.title,
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600,
+                        color: Colors.blueGrey[900],
+                        fontSize: fontSize,
                       ),
-                      Text(
-                        'Priority: ${request.priority} | Created: ${request.createdAt != null ? DateFormat.yMMMd().format(request.createdAt!) : 'Unknown'}',
-                        style: GoogleFonts.poppins(
-                          fontSize: isMobile ? 12 : 14,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: _getStatusColor(request.status),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    request.status,
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
                     ),
+                    Text(
+                      'Priority: ${request.priority} | Created: ${request.createdAt != null ? DateFormat.yMMMd().format(request.createdAt!) : 'Unknown'}',
+                      style: GoogleFonts.poppins(
+                        fontSize: isMobile ? 12 : 14,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _getStatusColor(request.status),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  request.status,
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _buildDetailRow('Description', request.description, fontSize, isMobile),
-            _buildDetailRow('Created By', request.createdByEmail ?? request.createdBy, fontSize, isMobile),
-            if (request.attachments.isNotEmpty)
-              _buildAttachmentsSection(request.attachments, fontSize),
-            if (request.comments.isNotEmpty)
-              _buildCommentsSection(request.comments, fontSize),
-            if (request.workOrderIds.isNotEmpty)
-              _buildWorkOrdersSection(request.workOrderIds, fontSize),
-            const SizedBox(height: 12),
-            if (!_isClient) _buildActionButtons(request, fontSize),
-          ],
-        ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _buildDetailRow('Description', request.description, fontSize, isMobile),
+          // Use FutureBuilder to fetch username from Users collection
+          FutureBuilder<String>(
+            future: _getUsernameFromCollection(request.createdBy),
+            builder: (context, snapshot) {
+              final displayName = snapshot.data ?? (request.createdByEmail ?? 'Loading...');
+              return _buildDetailRow('Created By', displayName, fontSize, isMobile);
+            },
+          ),
+          if (request.attachments.isNotEmpty)
+            _buildAttachmentsSection(request.attachments, fontSize),
+          _buildCommentsSection(request.comments, fontSize),
+          if (request.workOrderIds.isNotEmpty)
+            _buildWorkOrdersSection(request.workOrderIds, fontSize),
+          const SizedBox(height: 12),
+        ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildDetailRow(String label, String value, double fontSize, bool isMobile) {
     return Padding(
@@ -1166,54 +1498,63 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
     );
   }
 
-  Widget _buildCommentsSection(List<Map<String, dynamic>> comments, double fontSize) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Comments:',
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.w500,
-              color: Colors.blueGrey[700],
-              fontSize: fontSize,
-            ),
+Widget _buildCommentsSection(List<Map<String, dynamic>> comments, double fontSize) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 8.0),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Comments:',
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.w500,
+            color: Colors.blueGrey[700],
+            fontSize: fontSize,
           ),
-          const SizedBox(height: 4),
-          ...comments.map((entry) => Container(
-                margin: const EdgeInsets.only(bottom: 4),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+        ),
+        const SizedBox(height: 4),
+        ...comments.map((entry) => Container(
+              margin: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry['action'] ?? 'Comment',
+                    style: GoogleFonts.poppins(fontSize: fontSize - 2, fontWeight: FontWeight.w500),
+                  ),
+                  // Use FutureBuilder to fetch username for each comment
+                  FutureBuilder<String>(
+                    future: entry['userId'] != null && entry['userId'] != 'system' 
+                        ? _getUsernameFromCollection(entry['userId'])
+                        : Future.value(entry['username'] ?? entry['userEmail'] ?? 'Unknown'),
+                    builder: (context, snapshot) {
+                      final displayName = snapshot.data ?? 'Loading...';
+                      return Text(
+                        'by $displayName at ${entry['timestamp'] != null ? DateFormat.yMMMd().format((entry['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
+                        style: GoogleFonts.poppins(
+                          fontSize: fontSize - 4,
+                          color: Colors.grey[600],
+                        ),
+                      );
+                    },
+                  ),
+                  if (entry['comment'] != null && entry['comment'].isNotEmpty)
                     Text(
-                      entry['action'] ?? 'Comment',
-                      style: GoogleFonts.poppins(fontSize: fontSize - 2, fontWeight: FontWeight.w500),
+                      entry['comment'],
+                      style: GoogleFonts.poppins(fontSize: fontSize - 3),
                     ),
-                    Text(
-                      'by ${entry['userEmail'] ?? entry['userId'] ?? 'Unknown'} at ${entry['timestamp'] != null ? DateFormat.yMMMd().format((entry['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
-                      style: GoogleFonts.poppins(
-                        fontSize: fontSize - 4,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                    if (entry['comment'] != null && entry['comment'].isNotEmpty)
-                      Text(
-                        entry['comment'],
-                        style: GoogleFonts.poppins(fontSize: fontSize - 3),
-                      ),
-                  ],
-                ),
-              )),
-        ],
-      ),
-    );
-  }
+                ],
+              ),
+            )),
+      ],
+    ),
+  );
+}
 
   Widget _buildWorkOrdersSection(List<String> workOrderIds, double fontSize) {
     return Padding(
@@ -1241,102 +1582,6 @@ class _RequestScreenState extends State<RequestScreen> with TickerProviderStateM
                       backgroundColor: Colors.blue[50],
                     ))
                 .toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButtons(Request request, double fontSize) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        TextButton.icon(
-          onPressed: () => _showUpdateStatusDialog(request, fontSize),
-          icon: const Icon(Icons.edit, size: 16),
-          label: Text('Update Status', style: GoogleFonts.poppins(fontSize: fontSize)),
-          style: TextButton.styleFrom(
-            foregroundColor: Colors.blueGrey[700],
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _showUpdateStatusDialog(Request request, double fontSize) {
-    final commentController = TextEditingController();
-    String selectedStatus = request.status;
-
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Update Request Status', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: fontSize)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DropdownButtonFormField<String>(
-              value: selectedStatus,
-              items: ['Open', 'In Progress', 'Closed']
-                  .map((status) => DropdownMenuItem(
-                        value: status,
-                        child: Text(status, style: GoogleFonts.poppins(color: Colors.blueGrey[900])),
-                      ))
-                  .toList(),
-              onChanged: (value) => selectedStatus = value!,
-              decoration: InputDecoration(
-                labelText: 'Status',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Colors.grey[400]!),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
-                ),
-                filled: true,
-                fillColor: Colors.white,
-                labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-              ),
-              style: GoogleFonts.poppins(color: Colors.blueGrey[900]),
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: commentController,
-              decoration: InputDecoration(
-                labelText: 'Comment (optional)',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Colors.grey[400]!),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
-                ),
-                filled: true,
-                fillColor: Colors.grey[100],
-                labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-              ),
-              style: GoogleFonts.poppins(fontSize: fontSize),
-              maxLines: 2,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.poppins(fontSize: fontSize)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              _updateStatus(request.id, selectedStatus, commentController.text);
-              Navigator.pop(context);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blueGrey[800],
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            child: Text('Update', style: GoogleFonts.poppins(color: Colors.white, fontSize: fontSize)),
           ),
         ],
       ),
