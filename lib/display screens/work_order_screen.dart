@@ -745,6 +745,29 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
       if (user == null) return;
 
       _logger.i('Updating client status: docId=$docId, newStatus=$newStatus');
+      
+      // Create history entry with more detailed information
+      final historyEntry = {
+        'action': 'Client Status: $newStatus',
+        'timestamp': Timestamp.now(),
+        'notes': notes.isNotEmpty ? notes : 'No additional comments',
+        'userId': user.uid,
+        'userEmail': _createdByEmail,
+        'username': _createdByUsername ?? _createdByEmail ?? 'Unknown User',
+        'previousStatus': null, // Will be filled by getting current status first
+      };
+
+      // Get current status for history tracking
+      final currentDoc = await FirebaseFirestore.instance
+          .collection('Work_Orders')
+          .doc(docId)
+          .get();
+      
+      if (currentDoc.exists) {
+        final currentData = currentDoc.data() as Map<String, dynamic>;
+        historyEntry['previousStatus'] = currentData['clientStatus'] ?? 'Unknown';
+      }
+
       await FirebaseFirestore.instance
           .collection('Work_Orders')
           .doc(docId)
@@ -752,18 +775,16 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
         'clientStatus': newStatus,
         'clientNotes': notes,
         'clientActionDate': Timestamp.now(),
-        'history': FieldValue.arrayUnion([
-          {
-            'action': 'Client action: $newStatus',
-            'timestamp': Timestamp.now(),
-            'notes': notes,
-            'userId': user.uid,
-            'userEmail': _createdByEmail,
-            'username': _createdByUsername ?? _createdByEmail ?? 'Unknown User',
-          }
-        ]),
+        'history': FieldValue.arrayUnion([historyEntry]),
       });
-      if (mounted) _showSnackBar('Work order $newStatus');
+    
+      if (mounted) {
+        _showSnackBar(
+          newStatus == 'To be Reviewed' 
+            ? 'Work order sent for review'
+            : 'Work order $newStatus successfully'
+        );
+      }
     } catch (e) {
       _logger.e('Error updating client status: $e');
       if (mounted) _showSnackBar('Error updating status: $e');
@@ -1762,31 +1783,67 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
 
   Widget _buildActionButtons(WorkOrder workOrder, double fontSize) {
     if (_isAdminClient) {
-      // Admin client can approve, decline, or review
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          if (workOrder.clientStatus == 'To be Reviewed') ...[
-            TextButton.icon(
-              onPressed: () => _showClientActionDialog(workOrder, 'Approved', fontSize),
-              icon: Icon(Icons.check, size: 16, color: Colors.green[700]),
-              label: Text('Approve', style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.green[700])),
+      // Admin client gets all three action buttons with current status indication
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey[300]!),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Client Actions:',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: Colors.blueGrey[800],
+                fontSize: fontSize,
+              ),
             ),
-            TextButton.icon(
-              onPressed: () => _showClientActionDialog(workOrder, 'Declined', fontSize),
-              icon: Icon(Icons.close, size: 16, color: Colors.red[700]),
-              label: Text('Decline', style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.red[700])),
+            const SizedBox(height: 8),
+            Text(
+              'Current Status: ${workOrder.clientStatus}',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w500,
+                color: _getClientStatusColor(workOrder.clientStatus),
+                fontSize: fontSize - 1,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildActionButton(
+                  workOrder, 
+                  'Approved', 
+                  Icons.check_circle, 
+                  Colors.green[700]!, 
+                  fontSize,
+                  isCurrentStatus: workOrder.clientStatus == 'Approved',
+                ),
+                _buildActionButton(
+                  workOrder, 
+                  'Declined', 
+                  Icons.cancel, 
+                  Colors.red[700]!, 
+                  fontSize,
+                  isCurrentStatus: workOrder.clientStatus == 'Declined',
+                ),
+                _buildActionButton(
+                  workOrder, 
+                  'To be Reviewed', 
+                  Icons.rate_review, 
+                  Colors.orange[700]!, 
+                  fontSize,
+                  isCurrentStatus: workOrder.clientStatus == 'To be Reviewed',
+                ),
+              ],
             ),
           ],
-          TextButton.icon(
-            onPressed: () => _showClientActionDialog(workOrder, 'To be Reviewed', fontSize),
-            icon: const Icon(Icons.rate_review, size: 16),
-            label: Text('Review', style: GoogleFonts.poppins(fontSize: fontSize)),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.blueGrey[700],
-            ),
-          ),
-        ],
+        ),
       );
     } else if (_isJVAlmacisUser) {
       // JV Almacis users can update work order status
@@ -1809,58 +1866,237 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     }
   }
 
-  void _showClientActionDialog(WorkOrder workOrder, String action, double fontSize) {
+  Widget _buildActionButton(
+    WorkOrder workOrder, 
+    String action, 
+    IconData icon, 
+    Color color, 
+    double fontSize, {
+    bool isCurrentStatus = false,
+  }) {
+    return ElevatedButton.icon(
+      onPressed: () => _showEnhancedClientActionDialog(workOrder, action, fontSize),
+      icon: Icon(icon, size: 16, color: Colors.white),
+      label: Text(
+        action == 'To be Reviewed' ? 'Review' : action,
+        style: GoogleFonts.poppins(
+          fontSize: fontSize - 1,
+          color: Colors.white,
+          fontWeight: isCurrentStatus ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isCurrentStatus ? color : color.withValues(alpha: 0.7),
+        elevation: isCurrentStatus ? 4 : 2,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: isCurrentStatus 
+            ? BorderSide(color: color, width: 2)
+            : BorderSide.none,
+        ),
+      ),
+    );
+  }
+
+  void _showEnhancedClientActionDialog(WorkOrder workOrder, String action, double fontSize) {
     final notesController = TextEditingController();
+    
+    // Pre-fill with existing notes if updating the same status
+    if (workOrder.clientStatus == action && workOrder.clientNotes.isNotEmpty) {
+      notesController.text = workOrder.clientNotes;
+    }
 
     if (!mounted) return;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('$action Work Order', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: fontSize)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+        title: Row(
           children: [
-            Text(
-              'Are you sure you want to $action this work order?',
-              style: GoogleFonts.poppins(fontSize: fontSize),
+            Icon(
+              action == 'Approved' ? Icons.check_circle :
+              action == 'Declined' ? Icons.cancel : Icons.rate_review,
+              color: action == 'Approved' ? Colors.green[700] :
+                     action == 'Declined' ? Colors.red[700] : Colors.orange[700],
+              size: 24,
             ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: notesController,
-              decoration: InputDecoration(
-                labelText: 'Notes (optional)',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Colors.grey[400]!),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${action == 'To be Reviewed' ? 'Review' : action} Work Order',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold, 
+                  fontSize: fontSize,
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
-                ),
-                filled: true,
-                fillColor: Colors.grey[100],
-                labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
               ),
-              style: GoogleFonts.poppins(fontSize: fontSize),
-              maxLines: 3,
             ),
           ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Current status indicator
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      'Current Status: ',
+                      style: GoogleFonts.poppins(
+                        fontSize: fontSize - 1,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _getClientStatusColor(workOrder.clientStatus),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        workOrder.clientStatus,
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: fontSize - 2,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Action confirmation
+              RichText(
+                text: TextSpan(
+                  style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.black87),
+                  children: [
+                    const TextSpan(text: 'Change status to '),
+                    TextSpan(
+                      text: action,
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        color: action == 'Approved' ? Colors.green[700] :
+                               action == 'Declined' ? Colors.red[700] : Colors.orange[700],
+                      ),
+                    ),
+                    const TextSpan(text: '?'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Notes input
+              TextFormField(
+                controller: notesController,
+                decoration: InputDecoration(
+                  labelText: 'Comments (Optional)',
+                  hintText: 'Add your comments about this ${action.toLowerCase()} action...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.grey[400]!),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(
+                      color: action == 'Approved' ? Colors.green :
+                             action == 'Declined' ? Colors.red : Colors.orange,
+                      width: 2,
+                    ),
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey[50],
+                  labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
+                  prefixIcon: Icon(
+                    Icons.comment,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                style: GoogleFonts.poppins(fontSize: fontSize),
+                maxLines: 4,
+                minLines: 2,
+              ),
+              
+              // Show previous notes if they exist
+              if (workOrder.clientNotes.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Previous Notes:',
+                        style: GoogleFonts.poppins(
+                          fontSize: fontSize - 2,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.blue[800],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        workOrder.clientNotes,
+                        style: GoogleFonts.poppins(
+                          fontSize: fontSize - 2,
+                          color: Colors.blue[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.poppins(fontSize: fontSize)),
+            child: Text(
+              'Cancel', 
+              style: GoogleFonts.poppins(
+                fontSize: fontSize,
+                color: Colors.grey[600],
+              ),
+            ),
           ),
-          ElevatedButton(
+          ElevatedButton.icon(
             onPressed: () {
               _updateClientStatus(workOrder.id, action, notesController.text);
               Navigator.pop(context);
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: action == 'Approved' ? Colors.green[700] : action == 'Declined' ? Colors.red[700] : Colors.blueGrey[800],
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            icon: Icon(
+              action == 'Approved' ? Icons.check :
+              action == 'Declined' ? Icons.close : Icons.rate_review,
+              size: 16,
+              color: Colors.white,
             ),
-            child: Text(action, style: GoogleFonts.poppins(color: Colors.white, fontSize: fontSize)),
+            label: Text(
+              action == 'To be Reviewed' ? 'Review' : action,
+              style: GoogleFonts.poppins(
+                color: Colors.white, 
+                fontSize: fontSize,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: action == 'Approved' ? Colors.green[700] :
+                               action == 'Declined' ? Colors.red[700] : Colors.orange[700],
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              elevation: 3,
+            ),
           ),
         ],
       ),
