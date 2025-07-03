@@ -225,10 +225,10 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           newOrg = adminData?['organization'] ?? '-';
           _logger.i('User is Admin, org: $newOrg');
         } else if (developerDoc.exists) {
-          newRole = 'Technician';
+          newRole = 'Technician'; // Display as Technician but maintain Developer privileges
           newOrg = 'JV Almacis';
           isDev = true;
-          _logger.i('User is Developer, org: $newOrg');
+          _logger.i('User is Developer (displayed as Technician), org: $newOrg');
         } else if (technicianDoc.exists) {
           newRole = 'Technician';
           final techData = technicianDoc.data();

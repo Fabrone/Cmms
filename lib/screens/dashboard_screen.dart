@@ -205,7 +205,7 @@ class DashboardScreenState extends State<DashboardScreen> {
         newRole = 'Admin';
         newOrg = adminDoc.data()?['organization'] ?? '-';
       } else if (developerDoc.exists) {
-        newRole = 'Developer';
+        newRole = 'Technician'; // Display as Technician but maintain Developer privileges
         newOrg = 'JV Almacis';
       } else if (technicianDoc.exists) {
         newRole = 'Technician';
@@ -245,19 +245,8 @@ class DashboardScreenState extends State<DashboardScreen> {
           _organization = newOrg;
         });
         
-        // Determine client/service provider status
-        String statusText = _isClient ? 'Client' : 'Service Provider';
-        
-        _messengerKey.currentState?.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Your role is now: $_currentRole${_organization != '-' ? ' ($_organization)' : ''} - $statusText',
-              style: GoogleFonts.poppins(),
-            ),
-            duration: const Duration(seconds: 3),
-            backgroundColor: Colors.blueGrey[700],
-          ),
-        );
+        // Silent role switching - removed snackbar message
+        logger.i('Role updated silently: $_currentRole${_organization != '-' ? ' ($_organization)' : ''} - ${_isClient ? 'Client' : 'Service Provider'}');
       }
     } catch (e) {
       logger.e('Error updating user role and organization: $e');

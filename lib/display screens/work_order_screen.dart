@@ -10,7 +10,6 @@ import 'package:logger/logger.dart';
 import 'package:uuid/uuid.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cmms/models/work_order.dart';
-import 'package:cmms/models/request.dart';
 import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:dio/dio.dart';
@@ -45,7 +44,6 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
   String? _selectedRequestId;
   String? _selectedTechnicianId;
   String? _selectedTechnicianEmail;
-  String? _selectedTechnicianName;
   final List<Map<String, String>> _attachmentUrls = [];
   bool _showForm = false;
   String _currentRole = 'User';
@@ -328,7 +326,6 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
             _selectedRequestId = null;
             _selectedTechnicianId = null;
             _selectedTechnicianEmail = null;
-            _selectedTechnicianName = null;
             _showForm = false;
             _isSubmitting = false;
           });
@@ -1846,19 +1843,67 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
         ),
       );
     } else if (_isJVAlmacisUser) {
-      // JV Almacis users can update work order status
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          TextButton.icon(
-            onPressed: () => _showUpdateStatusDialog(workOrder, fontSize),
-            icon: const Icon(Icons.edit, size: 16),
-            label: Text('Update Status', style: GoogleFonts.poppins(fontSize: fontSize)),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.blueGrey[700],
+      // JV Almacis users can update work order status with enhanced colorful dialog
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey[300]!),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Work Order Actions:',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: Colors.blueGrey[800],
+                fontSize: fontSize,
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            Text(
+              'Current Status: ${workOrder.status}',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w500,
+                color: _getWorkOrderStatusColor(workOrder.status),
+                fontSize: fontSize - 1,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildWorkOrderStatusButton(
+                  workOrder, 
+                  'Open', 
+                  Icons.radio_button_unchecked, 
+                  Colors.blue[700]!, 
+                  fontSize,
+                  isCurrentStatus: workOrder.status == 'Open',
+                ),
+                _buildWorkOrderStatusButton(
+                  workOrder, 
+                  'In Progress', 
+                  Icons.hourglass_empty, 
+                  Colors.orange[700]!, 
+                  fontSize,
+                  isCurrentStatus: workOrder.status == 'In Progress',
+                ),
+                _buildWorkOrderStatusButton(
+                  workOrder, 
+                  'Completed', 
+                  Icons.check_circle, 
+                  Colors.green[700]!, 
+                  fontSize,
+                  isCurrentStatus: workOrder.status == 'Completed',
+                ),
+              ],
+            ),
+          ],
+        ),
       );
     } else {
       // Client technicians can only view
@@ -1875,7 +1920,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     bool isCurrentStatus = false,
   }) {
     return ElevatedButton.icon(
-      onPressed: () => _showEnhancedClientActionDialog(workOrder, action, fontSize),
+      onPressed: isCurrentStatus ? null : () => _showEnhancedClientActionDialog(workOrder, action, fontSize),
       icon: Icon(icon, size: 16, color: Colors.white),
       label: Text(
         action == 'To be Reviewed' ? 'Review' : action,
@@ -1886,8 +1931,41 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
         ),
       ),
       style: ElevatedButton.styleFrom(
-        backgroundColor: isCurrentStatus ? color : color.withValues(alpha: 0.7),
-        elevation: isCurrentStatus ? 4 : 2,
+        backgroundColor: isCurrentStatus ? color.withValues(alpha: 0.5) : color,
+        elevation: isCurrentStatus ? 1 : 3,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: isCurrentStatus 
+            ? BorderSide(color: color, width: 2)
+            : BorderSide.none,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkOrderStatusButton(
+    WorkOrder workOrder, 
+    String status, 
+    IconData icon, 
+    Color color, 
+    double fontSize, {
+    bool isCurrentStatus = false,
+  }) {
+    return ElevatedButton.icon(
+      onPressed: isCurrentStatus ? null : () => _showEnhancedUpdateStatusDialog(workOrder, status, fontSize),
+      icon: Icon(icon, size: 16, color: Colors.white),
+      label: Text(
+        status,
+        style: GoogleFonts.poppins(
+          fontSize: fontSize - 1,
+          color: Colors.white,
+          fontWeight: isCurrentStatus ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isCurrentStatus ? color.withValues(alpha: 0.5) : color,
+        elevation: isCurrentStatus ? 1 : 3,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
@@ -1911,27 +1989,48 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(
-              action == 'Approved' ? Icons.check_circle :
-              action == 'Declined' ? Icons.cancel : Icons.rate_review,
-              color: action == 'Approved' ? Colors.green[700] :
-                     action == 'Declined' ? Colors.red[700] : Colors.orange[700],
-              size: 24,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                action == 'Approved' ? Colors.green[700]! :
+                action == 'Declined' ? Colors.red[700]! : Colors.orange[700]!,
+                action == 'Approved' ? Colors.green[500]! :
+                action == 'Declined' ? Colors.red[500]! : Colors.orange[500]!,
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '${action == 'To be Reviewed' ? 'Review' : action} Work Order',
-                style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.bold, 
-                  fontSize: fontSize,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(16),
+              topRight: Radius.circular(16),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                action == 'Approved' ? Icons.check_circle :
+                action == 'Declined' ? Icons.cancel : Icons.rate_review,
+                color: Colors.white,
+                size: 24,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${action == 'To be Reviewed' ? 'Review' : action} Work Order',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold, 
+                    fontSize: fontSize,
+                    color: Colors.white,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
+        titlePadding: EdgeInsets.zero,
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -2103,84 +2202,251 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     );
   }
 
-  void _showUpdateStatusDialog(WorkOrder workOrder, double fontSize) {
+  void _showEnhancedUpdateStatusDialog(WorkOrder workOrder, String selectedStatus, double fontSize) {
     final notesController = TextEditingController();
-    String selectedStatus = workOrder.status;
 
     if (!mounted) return;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Update Work Order Status', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: fontSize)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DropdownButtonFormField<String>(
-              value: selectedStatus,
-              items: ['Open', 'In Progress', 'Completed', 'Closed']
-                  .map((status) => DropdownMenuItem(
-                        value: status,
-                        child: Text(status, style: GoogleFonts.poppins(color: Colors.blueGrey[900])),
-                      ))
-                  .toList(),
-              onChanged: (value) => selectedStatus = value!,
-              decoration: InputDecoration(
-                labelText: 'Status',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Colors.grey[400]!),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
-                ),
-                filled: true,
-                fillColor: Colors.white,
-                labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-              ),
-              style: GoogleFonts.poppins(color: Colors.blueGrey[900]),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.blueGrey[700]!, Colors.blueGrey[500]!],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: notesController,
-              decoration: InputDecoration(
-                labelText: 'Notes (optional)',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Colors.grey[400]!),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
-                ),
-                filled: true,
-                fillColor: Colors.grey[100],
-                labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-              ),
-              style: GoogleFonts.poppins(fontSize: fontSize),
-              maxLines: 2,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(16),
+              topRight: Radius.circular(16),
             ),
-          ],
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.work_outline,
+                color: Colors.white,
+                size: 24,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Update Work Order Status',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold, 
+                    fontSize: fontSize,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        titlePadding: EdgeInsets.zero,
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Current status indicator
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      'Current Status: ',
+                      style: GoogleFonts.poppins(
+                        fontSize: fontSize - 1,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _getWorkOrderStatusColor(workOrder.status),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        workOrder.status,
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: fontSize - 2,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Action confirmation
+              RichText(
+                text: TextSpan(
+                  style: GoogleFonts.poppins(fontSize: fontSize, color: Colors.black87),
+                  children: [
+                    const TextSpan(text: 'Change status to '),
+                    TextSpan(
+                      text: selectedStatus,
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        color: _getWorkOrderStatusColor(selectedStatus),
+                      ),
+                    ),
+                    const TextSpan(text: '?'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Notes input
+              TextFormField(
+                controller: notesController,
+                decoration: InputDecoration(
+                  labelText: 'Notes (Optional)',
+                  hintText: 'Add notes about this status update...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.grey[400]!),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.blueGrey[700]!, width: 2),
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey[50],
+                  labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
+                  prefixIcon: Icon(
+                    Icons.note_add,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                style: GoogleFonts.poppins(fontSize: fontSize),
+                maxLines: 3,
+                minLines: 2,
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.poppins(fontSize: fontSize)),
+            child: Text(
+              'Cancel', 
+              style: GoogleFonts.poppins(
+                fontSize: fontSize,
+                color: Colors.grey[600],
+              ),
+            ),
           ),
-          ElevatedButton(
+          ElevatedButton.icon(
             onPressed: () {
               _updateStatus(workOrder.id, selectedStatus, notesController.text);
               Navigator.pop(context);
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blueGrey[800],
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            icon: const Icon(Icons.update, size: 16, color: Colors.white),
+            label: Text(
+              'Update',
+              style: GoogleFonts.poppins(
+                color: Colors.white, 
+                fontSize: fontSize,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            child: Text('Update', style: GoogleFonts.poppins(color: Colors.white, fontSize: fontSize)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _getWorkOrderStatusColor(selectedStatus),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              elevation: 3,
+            ),
           ),
         ],
       ),
     );
+  }
+
+  // Helper method to get work order status colors
+  Color _getWorkOrderStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'open':
+        return Colors.blue[600]!;
+      case 'in progress':
+        return Colors.orange[600]!;
+      case 'completed':
+        return Colors.green[600]!;
+      default:
+        return Colors.grey[600]!;
+    }
+  }
+
+  Color _getClientStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return Colors.green;
+      case 'declined':
+        return Colors.red;
+      case 'to be reviewed':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  IconData _getClientStatusIcon(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return Icons.check_circle;
+      case 'declined':
+        return Icons.cancel;
+      case 'to be reviewed':
+        return Icons.rate_review;
+      default:
+        return Icons.help;
+    }
+  }
+
+  IconData _getFileIcon(String fileName) {
+    final extension = fileName.toLowerCase().split('.').last;
+    switch (extension) {
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      case 'docx':
+      case 'doc':
+        return Icons.description;
+      case 'txt':
+        return Icons.text_snippet;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+        return Icons.image;
+      default:
+        return Icons.insert_drive_file;
+    }
+  }
+
+  Color _getFileIconColor(String fileName) {
+    final extension = fileName.toLowerCase().split('.').last;
+    switch (extension) {
+      case 'pdf':
+        return Colors.red[600]!;
+      case 'docx':
+      case 'doc':
+        return Colors.blueGrey[600]!;
+      case 'txt':
+        return Colors.grey[600]!;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+        return Colors.green[600]!;
+      default:
+        return Colors.grey[600]!;
+    }
   }
 
   Widget _buildWorkOrderForm(double padding, double fontSizeTitle, double fontSizeSubtitle) {
@@ -2425,23 +2691,22 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
             itemBuilder: (context, index) {
               final doc = snapshot.docs[index];
               final data = doc.data();
-              final request = Request.fromMap(data, doc.id);
               
               return Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
-                  title: Text(request.title, style: GoogleFonts.poppins(fontSize: fontSize, fontWeight: FontWeight.w500)),
+                  title: Text(data['title'] ?? 'Untitled', style: GoogleFonts.poppins(fontSize: fontSize, fontWeight: FontWeight.w500)),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        request.description.length > 100 
-                            ? '${request.description.substring(0, 100)}...' 
-                            : request.description,
+                        (data['description'] ?? '').length > 100 
+                            ? '${(data['description'] ?? '').substring(0, 100)}...' 
+                            : (data['description'] ?? ''),
                         style: GoogleFonts.poppins(fontSize: fontSize - 2),
                       ),
                       Text(
-                        'Priority: ${request.priority} | Created: ${request.createdAt != null ? DateFormat.yMMMd().format(request.createdAt!) : 'Unknown'}',
+                        'Priority: ${data['priority'] ?? 'Medium'} | Created: ${data['createdAt'] != null ? DateFormat.yMMMd().format((data['createdAt'] as Timestamp).toDate()) : 'Unknown'}',
                         style: GoogleFonts.poppins(fontSize: fontSize - 3, color: Colors.grey[600]),
                       ),
                     ],
@@ -2458,9 +2723,9 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
                         onPressed: () {
                           setState(() {
                             _selectedRequestId = doc.id;
-                            _titleController.text = request.title;
-                            _descriptionController.text = request.description;
-                            _priority = request.priority;
+                            _titleController.text = data['title'] ?? '';
+                            _descriptionController.text = data['description'] ?? '';
+                            _priority = data['priority'] ?? 'Medium';
                           });
                           Navigator.pop(context);
                         },
@@ -2489,14 +2754,12 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
           .collection('Work_Requests')
           .doc(requestId)
           .get();
-
       if (!doc.exists) {
         _showSnackBar('Request not found');
         return;
       }
 
       final data = doc.data() as Map<String, dynamic>;
-      final request = Request.fromMap(data, doc.id);
 
       if (!mounted) return;
 
@@ -2511,54 +2774,20 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildDetailRow('Title', request.title, 14, false),
-                  _buildDetailRow('Description', request.description, 14, false),
-                  _buildDetailRow('Priority', request.priority, 14, false),
-                  _buildDetailRow('Status', request.status, 14, false),
+                  _buildDetailRow('Title', data['title'] ?? 'Untitled', 14, false),
+                  _buildDetailRow('Description', data['description'] ?? '', 14, false),
+                  _buildDetailRow('Priority', data['priority'] ?? 'Medium', 14, false),
+                  _buildDetailRow('Status', data['status'] ?? 'Open', 14, false),
                   FutureBuilder<String>(
-                    future: _getUsernameFromCollection(request.createdBy),
+                    future: _getUsernameFromCollection(data['createdBy'] ?? ''),
                     builder: (context, snapshot) {
-                      final displayName = snapshot.data ?? (request.createdByEmail ?? 'Loading...');
+                      final displayName = snapshot.data ?? (data['createdByEmail'] ?? 'Loading...');
                       return _buildDetailRow('Created By', displayName, 14, false);
                     },
                   ),
-                  _buildDetailRow('Created', request.createdAt != null ? DateFormat.yMMMd().format(request.createdAt!) : 'Unknown', 14, false),
-                  if (request.attachments.isNotEmpty)
-                    _buildAttachmentsSection(request.attachments, 14),
-                  if (request.comments.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Comments:',
-                      style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.w500,
-                        color: Colors.blueGrey[700],
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    ...request.comments.map((comment) => Container(
-                          margin: const EdgeInsets.only(bottom: 4),
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[100],
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                comment['action'] ?? 'Comment',
-                                style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500),
-                              ),
-                              if (comment['comment'] != null && comment['comment'].isNotEmpty)
-                                Text(
-                                  comment['comment'],
-                                  style: GoogleFonts.poppins(fontSize: 11),
-                                ),
-                            ],
-                          ),
-                        )),
-                  ],
+                  _buildDetailRow('Created', data['createdAt'] != null ? DateFormat.yMMMd().format((data['createdAt'] as Timestamp).toDate()) : 'Unknown', 14, false),
+                  if (data['attachments'] != null && (data['attachments'] as List).isNotEmpty)
+                    _buildAttachmentsSection(List<Map<String, String>>.from((data['attachments'] as List).map((item) => Map<String, String>.from(item))), 14),
                 ],
               ),
             ),
@@ -2580,8 +2809,8 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
   Widget _buildTechnicianField(double fontSize) {
     return TextFormField(
       controller: TextEditingController(
-        text: _selectedTechnicianName != null && _selectedTechnicianEmail != null
-            ? '$_selectedTechnicianName ($_selectedTechnicianEmail)'
+        text: _selectedTechnicianEmail != null
+            ? _selectedTechnicianEmail!
             : ""
       ),
       decoration: InputDecoration(
@@ -2714,7 +2943,6 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
                     setState(() {
                       _selectedTechnicianId = technician['id'];
                       _selectedTechnicianEmail = email;
-                      _selectedTechnicianName = username;
                     });
                     Navigator.pop(context);
                   },
@@ -2802,70 +3030,6 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
       dropdownColor: Colors.white,
       icon: Icon(Icons.arrow_drop_down, color: Colors.blueGrey[800]),
     );
-  }
-
-  IconData _getFileIcon(String fileName) {
-    final extension = fileName.toLowerCase().split('.').last;
-    switch (extension) {
-      case 'pdf':
-        return Icons.picture_as_pdf;
-      case 'docx':
-      case 'doc':
-        return Icons.description;
-      case 'txt':
-        return Icons.text_snippet;
-      case 'jpg':
-      case 'jpeg':
-      case 'png':
-        return Icons.image;
-      default:
-        return Icons.insert_drive_file;
-    }
-  }
-
-  Color _getFileIconColor(String fileName) {
-    final extension = fileName.toLowerCase().split('.').last;
-    switch (extension) {
-      case 'pdf':
-        return Colors.red[600]!;
-      case 'docx':
-      case 'doc':
-        return Colors.blueGrey[600]!;
-      case 'txt':
-        return Colors.grey[600]!;
-      case 'jpg':
-      case 'jpeg':
-      case 'png':
-        return Colors.green[600]!;
-      default:
-        return Colors.grey[600]!;
-    }
-  }
-
-  Color _getClientStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'approved':
-        return Colors.green;
-      case 'declined':
-        return Colors.red;
-      case 'to be reviewed':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  IconData _getClientStatusIcon(String status) {
-    switch (status.toLowerCase()) {
-      case 'approved':
-        return Icons.check_circle;
-      case 'declined':
-        return Icons.cancel;
-      case 'to be reviewed':
-        return Icons.rate_review;
-      default:
-        return Icons.help;
-    }
   }
 }
 
