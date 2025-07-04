@@ -1,13 +1,16 @@
-const functions = require("firebase-functions");
+const functions = require("firebase-functions/v2");
+const scheduler = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
 
 // Enhanced notification checker with 9 AM and 11 AM fallback
-exports.checkNotifications = functions.pubsub
-  .schedule("0 9,11 * * *") // Run at 9 AM and 11 AM daily
-  .timeZone("Africa/Nairobi") // Change to your timezone
-  .onRun(async () => {
+exports.checkNotifications = scheduler.onSchedule(
+  {
+    schedule: "0 9,11 * * *",
+    timeZone: "Africa/Nairobi",
+  },
+  async (event) => {
     const now = new Date();
     const currentHour = now.getHours();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -15,7 +18,6 @@ exports.checkNotifications = functions.pubsub
     console.log(`Running notification check at ${now.toISOString()} (Hour: ${currentHour})`);
 
     try {
-      // Get due notifications that haven't been triggered
       const notificationsSnapshot = await admin
         .firestore()
         .collection("Notifications")
@@ -24,9 +26,7 @@ exports.checkNotifications = functions.pubsub
         .get();
 
       console.log(`Found ${notificationsSnapshot.docs.length} notifications to process`);
-
       if (notificationsSnapshot.docs.length === 0) {
-        console.log("No due notifications found");
         return { success: true, processedCount: 0, message: "No notifications to process" };
       }
 
@@ -37,16 +37,12 @@ exports.checkNotifications = functions.pubsub
         const data = doc.data();
         const notifications = data.notifications || [];
 
-        console.log(`Processing notification group ${doc.id} with ${notifications.length} tasks`);
-
-        // Update each individual notification's isTriggered status
         const updatedNotifications = notifications.map((notification) => ({
           ...notification,
           isTriggered: true,
           triggeredAt: admin.firestore.FieldValue.serverTimestamp(),
         }));
 
-        // Get all users with FCM tokens (technicians, admins, and regular users)
         const usersSnapshot = await admin.firestore()
           .collection("Users")
           .where("fcmToken", "!=", null)
@@ -58,9 +54,7 @@ exports.checkNotifications = functions.pubsub
         for (const userDoc of usersSnapshot.docs) {
           const userData = userDoc.data();
           const fcmToken = userData.fcmToken;
-
-          // Check if notifications are enabled for this user
-          const notificationsEnabled = userData.notificationsEnabled !== false; // Default to true
+          const notificationsEnabled = userData.notificationsEnabled !== false;
 
           if (fcmToken && notificationsEnabled) {
             validTokens.push(fcmToken);
@@ -68,14 +62,11 @@ exports.checkNotifications = functions.pubsub
           }
         }
 
-        console.log(`Sending notifications to ${validTokens.length} users`);
-
         if (validTokens.length > 0) {
           const categories = [...new Set(notifications.map((n) => n.category))];
           const title = "🔧 Maintenance Tasks Due";
           const body = `${notifications.length} tasks due in: ${categories.join(", ")}`;
 
-          // Prepare the message payload
           const messagePayload = {
             notification: { title, body },
             data: {
@@ -101,7 +92,7 @@ exports.checkNotifications = functions.pubsub
                 tag: "maintenance_notification",
               },
               priority: "high",
-              ttl: 86400000, // 24 hours
+              ttl: 86400000,
             },
             apns: {
               payload: {
@@ -136,21 +127,11 @@ exports.checkNotifications = functions.pubsub
           try {
             const response = await admin.messaging().sendMulticast(messagePayload);
             console.log(`Sent ${response.successCount} notifications`);
-
-            if (response.failureCount > 0) {
-              console.log(`Failed to send ${response.failureCount} notifications`);
-              response.responses.forEach((resp, idx) => {
-                if (!resp.success) {
-                  console.error(`Failed to send to token ${validTokens[idx]}: ${resp.error}`);
-                }
-              });
-            }
           } catch (error) {
             console.error("Error sending multicast message:", error);
           }
         }
 
-        // Mark notification as triggered with updated individual notifications
         batch.update(doc.ref, {
           isTriggered: true,
           isRead: false,
@@ -175,11 +156,11 @@ exports.checkNotifications = functions.pubsub
       console.error("Error in checkNotifications:", error);
       throw new functions.https.HttpsError("internal", "Failed to process notifications", error);
     }
-  });
+  }
+);
 
 // Manual trigger function for testing
 exports.triggerNotificationsManually = functions.https.onCall(async (data, context) => {
-  // Verify the user is authenticated
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "User must be authenticated");
   }
@@ -190,14 +171,11 @@ exports.triggerNotificationsManually = functions.https.onCall(async (data, conte
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    // Get due notifications that haven't been triggered
     const notificationsSnapshot = await admin.firestore()
       .collection("Notifications")
       .where("notificationDate", "<=", admin.firestore.Timestamp.fromDate(today))
       .where("isTriggered", "==", false)
       .get();
-
-    console.log(`Manual trigger found ${notificationsSnapshot.docs.length} notifications`);
 
     if (notificationsSnapshot.docs.length === 0) {
       return { success: true, processedCount: 0, message: "No notifications to process" };
@@ -210,14 +188,12 @@ exports.triggerNotificationsManually = functions.https.onCall(async (data, conte
       const data = doc.data();
       const notifications = data.notifications || [];
 
-      // Update notification status
       const updatedNotifications = notifications.map((notification) => ({
         ...notification,
         isTriggered: true,
         triggeredAt: admin.firestore.FieldValue.serverTimestamp(),
       }));
 
-      // Mark as triggered
       batch.update(doc.ref, {
         isTriggered: true,
         isRead: false,
@@ -231,8 +207,6 @@ exports.triggerNotificationsManually = functions.https.onCall(async (data, conte
     }
 
     await batch.commit();
-    console.log(`Manual trigger processed ${processedCount} notification groups`);
-
     return {
       success: true,
       processedCount,
@@ -240,21 +214,17 @@ exports.triggerNotificationsManually = functions.https.onCall(async (data, conte
     };
   } catch (error) {
     console.error("Error in manual trigger:", error);
-    throw new functions.https.HttpsError(
-      "internal",
-      "Failed to trigger notifications",
-      error,
-    );
+    throw new functions.https.HttpsError("internal", "Failed to trigger notifications", error);
   }
 });
 
 // Function to clean up old notifications (run weekly)
-exports.cleanupOldNotifications = functions.pubsub
-  .schedule("0 0 * * 0") // Run every Sunday at midnight
-  .timeZone("Africa/Nairobi")
-  .onRun(async () => {
-    console.log("Running notification cleanup");
-
+exports.cleanupOldNotifications = scheduler.onSchedule(
+  {
+    schedule: "0 0 * * 0",
+    timeZone: "Africa/Nairobi",
+  },
+  async (event) => {
     try {
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -265,8 +235,6 @@ exports.cleanupOldNotifications = functions.pubsub
         .where("isTriggered", "==", true)
         .get();
 
-      console.log(`Found ${oldNotificationsSnapshot.docs.length} old notifications to clean up`);
-
       const batch = admin.firestore().batch();
       let deletedCount = 0;
 
@@ -276,7 +244,6 @@ exports.cleanupOldNotifications = functions.pubsub
       }
 
       await batch.commit();
-      console.log(`Cleaned up ${deletedCount} old notifications`);
 
       return {
         success: true,
@@ -287,4 +254,5 @@ exports.cleanupOldNotifications = functions.pubsub
       console.error("Error in cleanup:", error);
       throw new functions.https.HttpsError("internal", "Failed to cleanup notifications", error);
     }
-  });
+  }
+);
