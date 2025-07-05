@@ -9,7 +9,7 @@ class BillingData {
   final DateTime? uploadedAt;
   final String facilityId;
   final String status; // pending, paid
-  final String approvalStatus; // pending, approved, declined
+  final String approvalStatus; // pending, approved, review (removed declined)
   final String? approvalNotes;
   final String? approvedBy;
   final DateTime? approvedAt;
@@ -28,6 +28,14 @@ class BillingData {
     this.approvedBy,
     this.approvedAt,
   });
+
+  // Helper method to normalize legacy statuses
+  String get normalizedApprovalStatus {
+    if (approvalStatus.toLowerCase() == 'declined') {
+      return 'review'; // Convert legacy declined to review
+    }
+    return approvalStatus;
+  }
 
   factory BillingData.fromSnapshot(DocumentSnapshot snapshot) {
     final data = snapshot.data() as Map<String, dynamic>;
