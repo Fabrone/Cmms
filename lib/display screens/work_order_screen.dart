@@ -18,6 +18,9 @@ import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 import 'dart:typed_data';
 
+//import 'package:flutter_app/models/work_order.dart';
+//import 'package:flutter_app/providers/work_order_provider.dart';
+
 class WorkOrderScreen extends StatefulWidget {
   final String facilityId;
 
@@ -56,10 +59,9 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
   late TabController _tabController;
   bool _isSubmitting = false;
 
-  // Client status counts
+  // Client status counts (removed declined)
   int _allCount = 0;
   int _approvedCount = 0;
-  int _declinedCount = 0;
   int _toBeReviewedCount = 0;
 
   // Priority counts
@@ -233,7 +235,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     }
   }
 
-  // Add this method to fetch request title
+  // Modified method to fetch request title without ID
   Future<String> _getRequestTitleFromId(String requestId) async {
     try {
       final requestDoc = await FirebaseFirestore.instance
@@ -244,13 +246,13 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
       if (requestDoc.exists) {
         final requestData = requestDoc.data()!;
         final title = requestData['title'] ?? 'Untitled Request';
-        return '$title (ID: $requestId)';
+        return title; // Removed ID from display
       }
       
-      return 'Request ID: $requestId';
+      return 'Untitled Request';
     } catch (e) {
       _logger.e('Error fetching request title for $requestId: $e');
-      return 'Request ID: $requestId';
+      return 'Untitled Request';
     }
   }
 
@@ -817,11 +819,10 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     }
   }
 
-  // Update client status counts from all work orders
+  // Update client status counts from all work orders (removed declined)
   void _updateClientStatusCounts(List<QueryDocumentSnapshot> allDocs) {
     final newAllCount = allDocs.length;
     int newApprovedCount = 0;
-    int newDeclinedCount = 0;
     int newToBeReviewedCount = 0;
 
     for (var doc in allDocs) {
@@ -831,10 +832,11 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
         case 'Approved':
           newApprovedCount++;
           break;
-        case 'Declined':
-          newDeclinedCount++;
-          break;
         case 'To be Reviewed':
+          newToBeReviewedCount++;
+          break;
+        // Handle legacy "Declined" status by treating as "To be Reviewed"
+        case 'Declined':
           newToBeReviewedCount++;
           break;
       }
@@ -843,7 +845,6 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     // Only update if counts actually changed
     if (_allCount != newAllCount || 
         _approvedCount != newApprovedCount || 
-        _declinedCount != newDeclinedCount || 
         _toBeReviewedCount != newToBeReviewedCount) {
       
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -851,7 +852,6 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
           setState(() {
             _allCount = newAllCount;
             _approvedCount = newApprovedCount;
-            _declinedCount = newDeclinedCount;
             _toBeReviewedCount = newToBeReviewedCount;
           });
         }
@@ -962,7 +962,12 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     } else if (_isClientStatusFilterMode && _statusFilter != 'All') {
       return _allWorkOrders.where((doc) {
         final data = doc.data() as Map<String, dynamic>;
-        return data['clientStatus'] == _statusFilter;
+        final clientStatus = data['clientStatus'] ?? 'To be Reviewed';
+        // Handle legacy "Declined" status by treating as "To be Reviewed"
+        if (clientStatus == 'Declined' && _statusFilter == 'To be Reviewed') {
+          return true;
+        }
+        return clientStatus == _statusFilter;
       }).toList();
     } else if (!_isClientStatusFilterMode && _priorityFilter != 'All') {
       return _allWorkOrders.where((doc) {
@@ -1124,7 +1129,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
 
   Widget _buildResponsiveTabBar(bool isMobile, bool isTablet) {
     if (_isClientStatusFilterMode) {
-      // Client status filter tabs
+      // Client status filter tabs (removed declined)
       if (isMobile) {
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -1134,9 +1139,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
               const SizedBox(width: 8),
               _buildTabButton('Approved', _approvedCount, Colors.green, 1, true),
               const SizedBox(width: 8),
-              _buildTabButton('Declined', _declinedCount, Colors.red, 2, true),
-              const SizedBox(width: 8),
-              _buildTabButton('To be Reviewed', _toBeReviewedCount, Colors.orange, 3, true),
+              _buildTabButton('To be Reviewed', _toBeReviewedCount, Colors.orange, 2, true),
             ],
           ),
         );
@@ -1147,8 +1150,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
           children: [
             _buildTabButton('All', _allCount, Colors.grey, 0, true),
             _buildTabButton('Approved', _approvedCount, Colors.green, 1, true),
-            _buildTabButton('Declined', _declinedCount, Colors.red, 2, true),
-            _buildTabButton('To be Reviewed', _toBeReviewedCount, Colors.orange, 3, true),
+            _buildTabButton('To be Reviewed', _toBeReviewedCount, Colors.orange, 2, true),
           ],
         );
       }
@@ -1216,14 +1218,14 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
 
   Widget _buildTabButton(String label, int count, Color color, int index, bool isStatusMode) {
     final isSelected = isStatusMode 
-        ? _statusFilter == (index == 0 ? 'All' : ['Approved', 'Declined', 'To be Reviewed'][index - 1])
+        ? _statusFilter == (index == 0 ? 'All' : ['Approved', 'To be Reviewed'][index - 1])
         : _priorityFilter == (index == 0 ? 'All' : ['High', 'Medium', 'Low'][index - 1]);
     
     return GestureDetector(
       onTap: () {
         setState(() {
           if (isStatusMode) {
-            final newFilter = index == 0 ? 'All' : ['Approved', 'Declined', 'To be Reviewed'][index - 1];
+            final newFilter = index == 0 ? 'All' : ['Approved', 'To be Reviewed'][index - 1];
             _statusFilter = newFilter;
             
             // Enter approved sub-view if Approved is selected
@@ -1555,26 +1557,31 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
             ),
             const SizedBox(height: 12),
             _buildDetailRow('Description', workOrder.description, fontSize, isMobile),
-            // Use FutureBuilder to fetch username for Assigned To
-            if (workOrder.assignedTo.isNotEmpty)
+            
+            // Show "Assigned To" and "Created By" only to JV Almacis users
+            if (_isJVAlmacisUser) ...[
+              // Use FutureBuilder to fetch username for Assigned To
+              if (workOrder.assignedTo.isNotEmpty)
+                FutureBuilder<String>(
+                  future: _getUsernameFromCollection(workOrder.assignedTo),
+                  builder: (context, snapshot) {
+                    final displayName = snapshot.data ?? (workOrder.assignedToEmail.isNotEmpty ? workOrder.assignedToEmail : 'Loading...');
+                    return _buildDetailRow('Assigned To', displayName, fontSize, isMobile);
+                  },
+                ),
+              if (workOrder.assignedTo.isEmpty)
+                _buildDetailRow('Assigned To', 'Unassigned', fontSize, isMobile),
+              // Use FutureBuilder to fetch username for Created By
               FutureBuilder<String>(
-                future: _getUsernameFromCollection(workOrder.assignedTo),
+                future: _getUsernameFromCollection(workOrder.createdBy),
                 builder: (context, snapshot) {
-                  final displayName = snapshot.data ?? (workOrder.assignedToEmail.isNotEmpty ? workOrder.assignedToEmail : 'Loading...');
-                  return _buildDetailRow('Assigned To', displayName, fontSize, isMobile);
+                  final displayName = snapshot.data ?? (workOrder.createdByEmail.isNotEmpty ? workOrder.createdByEmail : 'Loading...');
+                  return _buildDetailRow('Created By', displayName, fontSize, isMobile);
                 },
               ),
-            if (workOrder.assignedTo.isEmpty)
-              _buildDetailRow('Assigned To', 'Unassigned', fontSize, isMobile),
-            // Use FutureBuilder to fetch username for Created By
-            FutureBuilder<String>(
-              future: _getUsernameFromCollection(workOrder.createdBy),
-              builder: (context, snapshot) {
-                final displayName = snapshot.data ?? (workOrder.createdByEmail.isNotEmpty ? workOrder.createdByEmail : 'Loading...');
-                return _buildDetailRow('Created By', displayName, fontSize, isMobile);
-              },
-            ),
-            // Use FutureBuilder to fetch request title for Related Request
+            ],
+            
+            // Use FutureBuilder to fetch request title for Related Request (without ID)
             if (workOrder.requestId != null)
               FutureBuilder<String>(
                 future: _getRequestTitleFromId(workOrder.requestId!),
@@ -1601,6 +1608,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: isMobile 
+        
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1749,22 +1757,34 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
                       entry['action'] ?? 'Action',
                       style: GoogleFonts.poppins(fontSize: fontSize - 2, fontWeight: FontWeight.w500),
                     ),
-                    // Use FutureBuilder to fetch username for each history entry
-                    FutureBuilder<String>(
-                      future: entry['userId'] != null && entry['userId'] != 'system' 
-                          ? _getUsernameFromCollection(entry['userId'])
-                          : Future.value(entry['username'] ?? entry['userEmail'] ?? 'Unknown'),
-                      builder: (context, snapshot) {
-                        final displayName = snapshot.data ?? 'Loading...';
-                        return Text(
-                          'by $displayName at ${entry['timestamp'] != null ? DateFormat.yMMMd().format((entry['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
-                          style: GoogleFonts.poppins(
-                            fontSize: fontSize - 4,
-                            color: Colors.grey[600],
-                          ),
-                        );
-                      },
-                    ),
+                    // Show different history format based on user type
+                    if (_isJVAlmacisUser) ...[
+                      // JV Almacis users see full history with actors
+                      FutureBuilder<String>(
+                        future: entry['userId'] != null && entry['userId'] != 'system' 
+                            ? _getUsernameFromCollection(entry['userId'])
+                            : Future.value(entry['username'] ?? entry['userEmail'] ?? 'Unknown'),
+                        builder: (context, snapshot) {
+                          final displayName = snapshot.data ?? 'Loading...';
+                          return Text(
+                            'by $displayName at ${entry['timestamp'] != null ? DateFormat.yMMMd().format((entry['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
+                            style: GoogleFonts.poppins(
+                              fontSize: fontSize - 4,
+                              color: Colors.grey[600],
+                            ),
+                          );
+                        },
+                      ),
+                    ] else ...[
+                      // Client users see only date without actor
+                      Text(
+                        'on ${entry['timestamp'] != null ? DateFormat.yMMMd().format((entry['timestamp'] as Timestamp).toDate()) : 'Unknown date'}',
+                        style: GoogleFonts.poppins(
+                          fontSize: fontSize - 4,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
                     if (entry['notes'] != null && entry['notes'].isNotEmpty)
                       Text(
                         entry['notes'],
@@ -1780,7 +1800,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
 
   Widget _buildActionButtons(WorkOrder workOrder, double fontSize) {
     if (_isAdminClient) {
-      // Admin client gets all three action buttons with current status indication
+      // Admin client gets only approve and review buttons (removed decline)
       return Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -1813,22 +1833,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
               spacing: 8,
               runSpacing: 8,
               children: [
-                _buildActionButton(
-                  workOrder, 
-                  'Approved', 
-                  Icons.check_circle, 
-                  Colors.green[700]!, 
-                  fontSize,
-                  isCurrentStatus: workOrder.clientStatus == 'Approved',
-                ),
-                _buildActionButton(
-                  workOrder, 
-                  'Declined', 
-                  Icons.cancel, 
-                  Colors.red[700]!, 
-                  fontSize,
-                  isCurrentStatus: workOrder.clientStatus == 'Declined',
-                ),
+                // REORDERED: Review button first, then Approve button
                 _buildActionButton(
                   workOrder, 
                   'To be Reviewed', 
@@ -1836,6 +1841,14 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
                   Colors.orange[700]!, 
                   fontSize,
                   isCurrentStatus: workOrder.clientStatus == 'To be Reviewed',
+                ),
+                _buildActionButton(
+                  workOrder, 
+                  'Approved', 
+                  Icons.check_circle, 
+                  Colors.green[700]!, 
+                  fontSize,
+                  isCurrentStatus: workOrder.clientStatus == 'Approved',
                 ),
               ],
             ),
@@ -1923,7 +1936,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
       onPressed: isCurrentStatus ? null : () => _showEnhancedClientActionDialog(workOrder, action, fontSize),
       icon: Icon(icon, size: 16, color: Colors.white),
       label: Text(
-        action == 'To be Reviewed' ? 'Review' : action,
+        action == 'To be Reviewed' ? 'Review' : action == 'Approved' ? 'Approve' : action,
         style: GoogleFonts.poppins(
           fontSize: fontSize - 1,
           color: Colors.white,
@@ -1995,10 +2008,8 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                action == 'Approved' ? Colors.green[700]! :
-                action == 'Declined' ? Colors.red[700]! : Colors.orange[700]!,
-                action == 'Approved' ? Colors.green[500]! :
-                action == 'Declined' ? Colors.red[500]! : Colors.orange[500]!,
+                action == 'Approved' ? Colors.green[700]! : Colors.orange[700]!,
+                action == 'Approved' ? Colors.green[500]! : Colors.orange[500]!,
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -2011,15 +2022,14 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
           child: Row(
             children: [
               Icon(
-                action == 'Approved' ? Icons.check_circle :
-                action == 'Declined' ? Icons.cancel : Icons.rate_review,
+                action == 'Approved' ? Icons.check_circle : Icons.rate_review,
                 color: Colors.white,
                 size: 24,
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '${action == 'To be Reviewed' ? 'Review' : action} Work Order',
+                  '${action == 'To be Reviewed' ? 'Review' : action == 'Approved' ? 'Approve' : action} Work Order',
                   style: GoogleFonts.poppins(
                     fontWeight: FontWeight.bold, 
                     fontSize: fontSize,
@@ -2082,8 +2092,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
                       text: action,
                       style: GoogleFonts.poppins(
                         fontWeight: FontWeight.bold,
-                        color: action == 'Approved' ? Colors.green[700] :
-                               action == 'Declined' ? Colors.red[700] : Colors.orange[700],
+                        color: action == 'Approved' ? Colors.green[700] : Colors.orange[700],
                       ),
                     ),
                     const TextSpan(text: '?'),
@@ -2105,8 +2114,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide(
-                      color: action == 'Approved' ? Colors.green :
-                             action == 'Declined' ? Colors.red : Colors.orange,
+                      color: action == 'Approved' ? Colors.green : Colors.orange,
                       width: 2,
                     ),
                   ),
@@ -2176,13 +2184,12 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
               Navigator.pop(context);
             },
             icon: Icon(
-              action == 'Approved' ? Icons.check :
-              action == 'Declined' ? Icons.close : Icons.rate_review,
+              action == 'Approved' ? Icons.check : Icons.rate_review,
               size: 16,
               color: Colors.white,
             ),
             label: Text(
-              action == 'To be Reviewed' ? 'Review' : action,
+              action == 'To be Reviewed' ? 'Review' : action == 'Approved' ? 'Approve' : action,
               style: GoogleFonts.poppins(
                 color: Colors.white, 
                 fontSize: fontSize,
@@ -2190,8 +2197,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
               ),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: action == 'Approved' ? Colors.green[700] :
-                               action == 'Declined' ? Colors.red[700] : Colors.orange[700],
+              backgroundColor: action == 'Approved' ? Colors.green[700] : Colors.orange[700],
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               elevation: 3,
@@ -2389,10 +2395,11 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     switch (status.toLowerCase()) {
       case 'approved':
         return Colors.green;
-      case 'declined':
-        return Colors.red;
       case 'to be reviewed':
         return Colors.orange;
+      // Handle legacy "Declined" status
+      case 'declined':
+        return Colors.orange; 
       default:
         return Colors.grey;
     }
@@ -2402,10 +2409,11 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
     switch (status.toLowerCase()) {
       case 'approved':
         return Icons.check_circle;
-      case 'declined':
-        return Icons.cancel;
       case 'to be reviewed':
         return Icons.rate_review;
+      // Handle legacy "Declined" status
+      case 'declined':
+        return Icons.rate_review; 
       default:
         return Icons.help;
     }

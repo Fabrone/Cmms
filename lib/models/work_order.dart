@@ -16,7 +16,7 @@ class WorkOrder {
   final String facilityId;
   final List<Map<String, String>> attachments;
   final List<Map<String, dynamic>> history;
-  final String clientStatus; // Approved, Declined, To be Reviewed
+  final String clientStatus; // Approved, To be Reviewed (Declined removed)
   final String clientNotes;
   final DateTime? clientActionDate;
 
@@ -47,6 +47,12 @@ class WorkOrder {
   }
 
   factory WorkOrder.fromMap(Map<String, dynamic> data, String id) {
+    // Handle legacy "Declined" status by converting to "To be Reviewed"
+    String clientStatus = data['clientStatus'] ?? 'To be Reviewed';
+    if (clientStatus == 'Declined') {
+      clientStatus = 'To be Reviewed';
+    }
+
     return WorkOrder(
       id: id,
       workOrderId: data['workOrderId'] ?? id,
@@ -67,7 +73,7 @@ class WorkOrder {
       history: (data['history'] as List<dynamic>?)
           ?.map((item) => Map<String, dynamic>.from(item as Map))
           .toList() ?? [],
-      clientStatus: data['clientStatus'] ?? 'To be Reviewed',
+      clientStatus: clientStatus,
       clientNotes: data['clientNotes'] ?? '',
       clientActionDate: (data['clientActionDate'] as Timestamp?)?.toDate(),
     );
