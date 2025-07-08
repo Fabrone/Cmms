@@ -121,6 +121,7 @@ class _WorkOrderScreenState extends State<WorkOrderScreen> with TickerProviderSt
         newOrg = data['organization'] ?? '-';
         username = data['username'] ?? data['name'] ?? data['displayName'];
         isClient = newOrg != 'JV Almacis';
+        isJVAlmacisUser = newOrg == 'JV Almacis';
         isAdminClient = isClient; // Admin client has special privileges
       } else if (developerDoc.exists) {
         newRole = 'Technician';
