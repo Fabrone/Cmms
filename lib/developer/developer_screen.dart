@@ -47,6 +47,26 @@ class DeveloperScreenState extends State<DeveloperScreen> {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 20),
+                  
+                  // 🔧 NEW: Organizations management
+                  ListTile(
+                    leading: const Icon(Icons.business, color: Colors.blueGrey),
+                    title: const Text('Organizations'),
+                    subtitle: const Text('Manage system organizations'),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const CollectionDetailScreen(
+                          collectionName: 'Organizations',
+                          fields: ['name', 'description', 'createdAt', 'isActive'],
+                          hasActions: true,
+                        ),
+                      ),
+                    ),
+                  ),
+                  
+                  const Divider(),
+                  
                   ListTile(
                     leading: const Icon(Icons.admin_panel_settings, color: Colors.blueGrey),
                     title: const Text('Admins'),
@@ -117,6 +137,9 @@ class DeveloperScreenState extends State<DeveloperScreen> {
                       ),
                     ),
                   ),
+                  
+                  const Divider(),
+                  
                   ListTile(
                     leading: const Icon(Icons.build, color: Colors.blueGrey),
                     title: const Text('Update M-Tasks'),
