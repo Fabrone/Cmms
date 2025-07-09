@@ -30,7 +30,7 @@ class ResponsiveScreenWrapper extends StatefulWidget {
   final String facilityId;
   final String? currentRole;
   final String? organization;
-  final String? selectedOrganizationName; // Selected organization name for service providers
+  final String? selectedOrganizationName;
   final List<Widget>? actions;
   final Widget? floatingActionButton;
   final VoidCallback? onFacilityReset;
@@ -42,7 +42,7 @@ class ResponsiveScreenWrapper extends StatefulWidget {
     required this.facilityId,
     this.currentRole,
     this.organization,
-    this.selectedOrganizationName, // Optional selected organization name
+    this.selectedOrganizationName,
     this.actions,
     this.floatingActionButton,
     this.onFacilityReset,
@@ -60,6 +60,10 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   String _organization = '-';
   bool _isDeveloper = false;
   bool _isClient = false;
+  
+  // Static variable to persist expansion state across widget rebuilds
+  static bool _isBuildingInfoExpanded = false;
+  
   final List<StreamSubscription<DocumentSnapshot>> _organizationSubscriptions = [];
 
   @override
@@ -71,6 +75,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'Initializing ResponsiveScreenWrapper for ${widget.title}, facilityId: ${widget.facilityId}, role: $_currentRole, org: $_organization, selectedOrg: ${widget.selectedOrganizationName}');
     _fetchUserRoleWithRetry();
     _setupOrganizationListeners();
+    
     // Force rebuild after 2 seconds to catch late query results
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
@@ -152,9 +157,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           .get();
 
       if (technicianDoc.exists) {
-        // User is a Technician - check organization from Technicians collection
         orgFromCheck = technicianDoc.data()?['organization'] ?? '-';
-        // 🔧 CORRECTED: Client is anyone NOT from JV Almacis
         isClient = orgFromCheck != 'JV Almacis';
         _logger.i('Technician organization check: $orgFromCheck, isClient: $isClient');
       } else {
@@ -166,7 +169,6 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
         if (userDoc.exists) {
           orgFromCheck = userDoc.data()?['organization'] ?? '-';
-          // 🔧 CORRECTED: Client is anyone NOT from JV Almacis
           isClient = orgFromCheck != 'JV Almacis';
           _logger.i('User organization check: $orgFromCheck, isClient: $isClient');
         }
@@ -184,8 +186,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
     }
   }
 
-  Future<void> _fetchUserRoleWithRetry(
-      {int retries = 3, int delayMs = 500}) async {
+  Future<void> _fetchUserRoleWithRetry({int retries = 3, int delayMs = 500}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       _logger.w('No user logged in, skipping role fetch for ${widget.title}');
@@ -229,7 +230,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           newOrg = adminData?['organization'] ?? '-';
           _logger.i('User is Admin, org: $newOrg');
         } else if (developerDoc.exists) {
-          newRole = 'Technician'; // Display as Technician but maintain Developer privileges
+          newRole = 'Technician';
           newOrg = 'JV Almacis';
           isDev = true;
           _logger.i('User is Developer (displayed as Technician), org: $newOrg');
@@ -255,16 +256,15 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           });
         }
 
-        // Check client status after role fetch
         await _checkClientStatus();
-        return; // Success, exit retry loop
+        return;
       } catch (e, stackTrace) {
         _logger.e(
             'Error getting user role on attempt $attempt for ${widget.title}: $e',
             stackTrace: stackTrace);
         if (attempt < retries) {
           await Future.delayed(Duration(milliseconds: delayMs));
-          delayMs *= 2; // Exponential backoff
+          delayMs *= 2;
         } else {
           if (mounted) {
             setState(() {});
@@ -282,29 +282,24 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       return;
     }
 
-    _logger.i(
-        'App icon clicked on ${widget.title}, navigating to DeveloperScreen');
+    _logger.i('App icon clicked on ${widget.title}, navigating to DeveloperScreen');
 
     try {
-      // Close drawer first if on mobile
       final screenWidth = MediaQuery.of(context).size.width;
       final isMobile = screenWidth <= 600;
 
       if (isMobile && _scaffoldKey.currentState?.isDrawerOpen == true) {
-        Navigator.pop(context); // Close drawer
+        Navigator.pop(context);
         _logger.i('Closed drawer before navigation on ${widget.title}');
-        // Add small delay to ensure drawer closes properly
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
-      // Navigate to developer screen
       if (mounted) {
         await Navigator.push(
           context,
           MaterialPageRoute(builder: (context) => const DeveloperScreen()),
         );
-        _logger.i(
-            'Successfully navigated to DeveloperScreen from ${widget.title}');
+        _logger.i('Successfully navigated to DeveloperScreen from ${widget.title}');
       }
     } catch (e) {
       _logger.e('Error navigating to DeveloperScreen: $e');
@@ -361,8 +356,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   }
 
   Widget _buildDrawer() {
-    _logger
-        .d('Building drawer for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient, selectedOrg: ${widget.selectedOrganizationName}');
+    _logger.d('Building drawer for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient, selectedOrg: ${widget.selectedOrganizationName}');
     return Drawer(
       child: Column(
         children: [
@@ -374,8 +368,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   }
 
   Widget _buildSidebar() {
-    _logger
-        .d('Building sidebar for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient, selectedOrg: ${widget.selectedOrganizationName}');
+    _logger.d('Building sidebar for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient, selectedOrg: ${widget.selectedOrganizationName}');
     return Container(
       width: 250,
       color: Colors.blueGrey[50],
@@ -393,8 +386,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   }
 
   Widget _buildAppIcon() {
-    _logger
-        .d('Building app icon for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient, selectedOrg: ${widget.selectedOrganizationName}');
+    _logger.d('Building app icon for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient, selectedOrg: ${widget.selectedOrganizationName}');
 
     return GestureDetector(
       onTap: _isDeveloper ? _handleDeveloperIconTap : null,
@@ -421,7 +413,6 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
                       height: 60,
                     ),
                   ),
-                  // 🔧 CORRECTED: Client indicator only for non-JV Almacis users
                   if (_isClient && _organization != 'JV Almacis')
                     Positioned(
                       bottom: 0,
@@ -444,7 +435,6 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
                     ),
                 ],
               ),
-              // Show selected organization for service providers managing client organizations
               if (!_isClient && widget.selectedOrganizationName != null && widget.selectedOrganizationName!.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -480,9 +470,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'Embassy': [
           'Facilities',
           'Locations',
-          'Documentations',
-          'Building Survey',
-          'Drawings',
+          'Building Information',
           'Schedule Maintenance',
           'Preventive Maintenance',
           'Reports',
@@ -495,9 +483,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'JV Almacis': [
           'Facilities',
           'Locations',
-          'Documentations',
-          'Building Survey',
-          'Drawings',
+          'Building Information',
           'Schedule Maintenance',
           'Preventive Maintenance',
           'Reports',
@@ -517,11 +503,9 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'Embassy': [
           'Facilities',
           'Locations',
-          'Documentations',
+          'Building Information',
           'Preventive Maintenance',
           'Schedule Maintenance',
-          'Building Survey',
-          'Drawings',
           'Reports',
           'Work on Request',
           'Work Orders',
@@ -532,11 +516,9 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'JV Almacis': [
           'Facilities',
           'Locations',
-          'Documentations',
+          'Building Information',
           'Preventive Maintenance',
           'Schedule Maintenance',
-          'Building Survey',
-          'Drawings',
           'Reports',
           'Price Lists',
           'Work on Request',
@@ -553,54 +535,32 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       },
     };
 
-    // Updated menu structure with Documentations moved after Locations
     final menuStructure = [
       {'title': 'Facilities', 'icon': Icons.business, 'isSubItem': false},
       {'title': 'Locations', 'icon': Icons.location_on, 'isSubItem': false},
-      {'title': 'Documentations', 'icon': Icons.description, 'isSubItem': false}, // Moved here and made main item
-      {
-        'title': 'Building Survey',
-        'icon': Icons.account_balance,
-        'isSubItem': false
-      },
-      {'title': 'Drawings', 'icon': Icons.brush, 'isSubItem': true},
-      {
-        'title': 'Schedule Maintenance',
-        'icon': Icons.event,
-        'isSubItem': false
-      },
-      {
-        'title': 'Preventive Maintenance',
-        'icon': Icons.build_circle,
-        'isSubItem': true
-      },
-      {'title': 'Reports', 'icon': Icons.bar_chart, 'isSubItem': true},
-      {
-        'title': 'Work on Request',
-        'icon': Icons.request_page,
-        'isSubItem': false
-      },
+      {'title': 'Building Information', 'icon': Icons.info, 'isSubItem': false, 'isParent': true},
+      {'title': 'Schedule Maintenance', 'icon': Icons.event, 'isSubItem': false},
+      {'title': 'Preventive Maintenance', 'icon': Icons.build_circle, 'isSubItem': false},
+      {'title': 'Reports', 'icon': Icons.bar_chart, 'isSubItem': false},
+      {'title': 'Work on Request', 'icon': Icons.request_page, 'isSubItem': false},
       {'title': 'Work Orders', 'icon': Icons.work, 'isSubItem': false},
       {'title': 'Price Lists', 'icon': Icons.attach_money, 'isSubItem': false},
       {'title': 'Billing', 'icon': Icons.receipt_long, 'isSubItem': false},
-      {
-        'title': 'Equipment Supplied',
-        'icon': Icons.construction,
-        'isSubItem': false
-      },
-      {
-        'title': 'Inventory and Parts',
-        'icon': Icons.inventory,
-        'isSubItem': false
-      },
+      {'title': 'Equipment Supplied', 'icon': Icons.construction, 'isSubItem': false},
+      {'title': 'Inventory and Parts', 'icon': Icons.inventory, 'isSubItem': false},
       {'title': 'Vendors', 'icon': Icons.store, 'isSubItem': false},
       {'title': 'KPIs', 'icon': Icons.trending_up, 'isSubItem': false},
       {'title': 'Report', 'icon': Icons.bar_chart, 'isSubItem': false},
       {'title': 'Settings', 'icon': Icons.settings, 'isSubItem': false},
     ];
 
-    final allowedItems =
-        roleMenuAccess[role]?[org] ?? roleMenuAccess['User']!['-']!;
+    final buildingInfoSubItems = [
+      {'title': 'Building Survey', 'icon': Icons.account_balance},
+      {'title': 'Documentations', 'icon': Icons.description},
+      {'title': 'Drawings', 'icon': Icons.brush},
+    ];
+
+    final allowedItems = roleMenuAccess[role]?[org] ?? roleMenuAccess['User']!['-']!;
     final List<Widget> menuWidgets = [];
 
     for (var menuItem in menuStructure) {
@@ -610,26 +570,128 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       }
       final icon = menuItem['icon'] as IconData;
       final isSubItem = menuItem['isSubItem'] as bool;
+      final isParent = menuItem['isParent'] as bool? ?? false;
 
-      menuWidgets.add(
-        ListTile(
-          contentPadding:
-              isSubItem ? const EdgeInsets.only(left: 32.0, right: 16.0) : null,
-          leading: Icon(icon, color: Colors.blueGrey),
-          title: Text(itemTitle, style: GoogleFonts.poppins()),
-          onTap: () => _handleMenuNavigation(itemTitle),
-        ),
-      );
+      if (isParent && itemTitle == 'Building Information') {
+        // Add the parent Building Information item
+        menuWidgets.add(
+          ListTile(
+            leading: Icon(icon, color: Colors.blueGrey),
+            title: Text(itemTitle, style: GoogleFonts.poppins()),
+            trailing: Icon(
+              _isBuildingInfoExpanded ? Icons.expand_less : Icons.expand_more,
+              color: Colors.blueGrey,
+            ),
+            onTap: () {
+              setState(() {
+                _isBuildingInfoExpanded = !_isBuildingInfoExpanded;
+              });
+              _logger.i('Building Information menu ${_isBuildingInfoExpanded ? 'expanded' : 'collapsed'}');
+            },
+          ),
+        );
+
+        // Add sub-items if expanded
+        if (_isBuildingInfoExpanded) {
+          for (var subItem in buildingInfoSubItems) {
+            final subTitle = subItem['title'] as String;
+            final subIcon = subItem['icon'] as IconData;
+            
+            menuWidgets.add(
+              ListTile(
+                contentPadding: const EdgeInsets.only(left: 32.0, right: 16.0),
+                leading: Icon(subIcon, color: Colors.blueGrey[600], size: 20),
+                title: Text(
+                  subTitle, 
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    color: Colors.blueGrey[700],
+                  ),
+                ),
+                onTap: () {
+                  _logger.i('Sub-menu item clicked: $subTitle, preserving expansion state');
+                  _handleSubMenuNavigation(subTitle);
+                },
+              ),
+            );
+          }
+        }
+      } else if (!isParent) {
+        // Add regular menu items (not Building Information sub-items)
+        if (!['Building Survey', 'Documentations', 'Drawings'].contains(itemTitle)) {
+          menuWidgets.add(
+            ListTile(
+              contentPadding: isSubItem ? const EdgeInsets.only(left: 32.0, right: 16.0) : null,
+              leading: Icon(icon, color: Colors.blueGrey),
+              title: Text(itemTitle, style: GoogleFonts.poppins()),
+              onTap: () => _handleMenuNavigation(itemTitle),
+            ),
+          );
+        }
+      }
     }
 
     return menuWidgets;
+  }
+
+  void _handleSubMenuNavigation(String title) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth <= 600;
+    
+    // Only close drawer on mobile, DON'T change expansion state
+    if (isMobile) {
+      Navigator.pop(context);
+      _logger.i('Closed drawer for sub-menu navigation to $title, expansion state preserved');
+    }
+
+    // Validate facilityId before navigation
+    if (widget.facilityId.isEmpty && !['Settings'].contains(title)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Please select a facility first.',
+            style: GoogleFonts.poppins(),
+          ),
+        ),
+      );
+      _logger.w('Sub-menu navigation blocked: No facility selected for $title, facilityId: ${widget.facilityId}');
+      return;
+    }
+
+    final screenMap = {
+      'Building Survey': () => BuildingSurveyScreen(
+          facilityId: widget.facilityId, selectedSubSection: ''),
+      'Documentations': () => DocumentationsScreen(facilityId: widget.facilityId),
+      'Drawings': () => DrawingsScreen(facilityId: widget.facilityId),
+    };
+
+    final screenBuilder = screenMap[title];
+    if (screenBuilder != null) {
+      // Navigate without changing the expansion state
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => screenBuilder()),
+      ).then((_) {
+        // When returning from navigation, ensure expansion state is preserved
+        _logger.i('Returned from $title screen, expansion state: $_isBuildingInfoExpanded');
+      });
+      
+      _logger.i('Navigated to sub-menu $title screen, facilityId: ${widget.facilityId}, expansion state preserved: $_isBuildingInfoExpanded');
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$title feature not found', style: GoogleFonts.poppins()),
+        ),
+      );
+      _logger.w('Sub-menu navigation failed: $title feature not found');
+    }
   }
 
   void _handleMenuNavigation(String title) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth <= 600;
     if (isMobile) {
-      Navigator.pop(context); // Close drawer
+      Navigator.pop(context);
       _logger.i('Closed drawer for navigation to $title');
     }
 
@@ -638,13 +700,11 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(
-          builder: (context) =>
-              const DashboardScreen(facilityId: '', role: 'User'),
+          builder: (context) => const DashboardScreen(facilityId: '', role: 'User'),
         ),
         (route) => false,
       );
-      _logger.i(
-          'Navigated to DashboardScreen for facility selection, facilityId: ""');
+      _logger.i('Navigated to DashboardScreen for facility selection, facilityId: ""');
       return;
     }
 
@@ -658,32 +718,21 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           ),
         ),
       );
-      _logger.w(
-          'Navigation blocked: No facility selected for $title, facilityId: ${widget.facilityId}');
+      _logger.w('Navigation blocked: No facility selected for $title, facilityId: ${widget.facilityId}');
       return;
     }
 
     final screenMap = {
       'Locations': () => LocationsScreen(facilityId: widget.facilityId),
-      'Building Survey': () => BuildingSurveyScreen(
-          facilityId: widget.facilityId, selectedSubSection: ''),
-      'Documentations': () =>
-          DocumentationsScreen(facilityId: widget.facilityId),
-      'Drawings': () => DrawingsScreen(facilityId: widget.facilityId),
-      'Schedule Maintenance': () =>
-          ScheduleMaintenanceScreen(facilityId: widget.facilityId),
-      'Preventive Maintenance': () =>
-          PreventiveMaintenanceScreen(facilityId: widget.facilityId),
+      'Schedule Maintenance': () => ScheduleMaintenanceScreen(facilityId: widget.facilityId),
+      'Preventive Maintenance': () => PreventiveMaintenanceScreen(facilityId: widget.facilityId),
       'Reports': () => ReportsScreen(facilityId: widget.facilityId),
       'Work on Request': () => RequestScreen(facilityId: widget.facilityId),
       'Work Orders': () => WorkOrderScreen(facilityId: widget.facilityId),
       'Price Lists': () => PriceListScreen(facilityId: widget.facilityId),
-      'Billing': () =>
-          BillingScreen(facilityId: widget.facilityId, userRole: _currentRole),
-      'Equipment Supplied': () =>
-          EquipmentSuppliedScreen(facilityId: widget.facilityId),
-      'Inventory and Parts': () =>
-          InventoryScreen(facilityId: widget.facilityId),
+      'Billing': () => BillingScreen(facilityId: widget.facilityId, userRole: _currentRole),
+      'Equipment Supplied': () => EquipmentSuppliedScreen(facilityId: widget.facilityId),
+      'Inventory and Parts': () => InventoryScreen(facilityId: widget.facilityId),
       'Vendors': () => VendorScreen(facilityId: widget.facilityId),
       'KPIs': () => KpiScreen(facilityId: widget.facilityId),
       'Report': () => ReportScreen(facilityId: widget.facilityId),
@@ -697,13 +746,10 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         MaterialPageRoute(builder: (context) => screenBuilder()),
       );
       _logger.i('Navigated to $title screen, facilityId: ${widget.facilityId}');
-      // Re-fetch role after navigation to ensure fresh state
-      _fetchUserRoleWithRetry(retries: 1);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content:
-              Text('$title feature not found', style: GoogleFonts.poppins()),
+          content: Text('$title feature not found', style: GoogleFonts.poppins()),
         ),
       );
       _logger.w('Navigation failed: $title feature not found');
