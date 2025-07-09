@@ -30,6 +30,7 @@ class ResponsiveScreenWrapper extends StatefulWidget {
   final String facilityId;
   final String? currentRole;
   final String? organization;
+  final String? selectedOrganizationName; // Selected organization name for service providers
   final List<Widget>? actions;
   final Widget? floatingActionButton;
   final VoidCallback? onFacilityReset;
@@ -41,6 +42,7 @@ class ResponsiveScreenWrapper extends StatefulWidget {
     required this.facilityId,
     this.currentRole,
     this.organization,
+    this.selectedOrganizationName, // Optional selected organization name
     this.actions,
     this.floatingActionButton,
     this.onFacilityReset,
@@ -66,7 +68,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
     _currentRole = widget.currentRole ?? 'User';
     _organization = widget.organization ?? '-';
     _logger.i(
-        'Initializing ResponsiveScreenWrapper for ${widget.title}, facilityId: ${widget.facilityId}, role: $_currentRole, org: $_organization');
+        'Initializing ResponsiveScreenWrapper for ${widget.title}, facilityId: ${widget.facilityId}, role: $_currentRole, org: $_organization, selectedOrg: ${widget.selectedOrganizationName}');
     _fetchUserRoleWithRetry();
     _setupOrganizationListeners();
     // Force rebuild after 2 seconds to catch late query results
@@ -152,6 +154,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       if (technicianDoc.exists) {
         // User is a Technician - check organization from Technicians collection
         orgFromCheck = technicianDoc.data()?['organization'] ?? '-';
+        // 🔧 CORRECTED: Client is anyone NOT from JV Almacis
         isClient = orgFromCheck != 'JV Almacis';
         _logger.i('Technician organization check: $orgFromCheck, isClient: $isClient');
       } else {
@@ -163,6 +166,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
         if (userDoc.exists) {
           orgFromCheck = userDoc.data()?['organization'] ?? '-';
+          // 🔧 CORRECTED: Client is anyone NOT from JV Almacis
           isClient = orgFromCheck != 'JV Almacis';
           _logger.i('User organization check: $orgFromCheck, isClient: $isClient');
         }
@@ -358,7 +362,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
   Widget _buildDrawer() {
     _logger
-        .d('Building drawer for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient');
+        .d('Building drawer for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient, selectedOrg: ${widget.selectedOrganizationName}');
     return Drawer(
       child: Column(
         children: [
@@ -371,7 +375,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
   Widget _buildSidebar() {
     _logger
-        .d('Building sidebar for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient');
+        .d('Building sidebar for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient, selectedOrg: ${widget.selectedOrganizationName}');
     return Container(
       width: 250,
       color: Colors.blueGrey[50],
@@ -390,7 +394,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
   Widget _buildAppIcon() {
     _logger
-        .d('Building app icon for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient');
+        .d('Building app icon for ${widget.title}, isDeveloper: $_isDeveloper, isClient: $_isClient, selectedOrg: ${widget.selectedOrganizationName}');
 
     return GestureDetector(
       onTap: _isDeveloper ? _handleDeveloperIconTap : null,
@@ -399,43 +403,67 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         padding: const EdgeInsets.symmetric(vertical: 20),
         width: double.infinity,
         child: Center(
-          child: Stack(
+          child: Column(
             children: [
-              Container(
-                decoration: _isDeveloper
-                    ? BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        color: Colors.blueGrey.withValues(alpha: 0.1),
-                      )
-                    : null,
-                padding: const EdgeInsets.all(8),
-                child: Image.asset(
-                  'assets/icons/icon.png',
-                  width: 60,
-                  height: 60,
-                ),
-              ),
-              // Client indicator
-              if (_isClient)
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.8),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      'Client',
-                      style: GoogleFonts.poppins(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                      ),
+              Stack(
+                children: [
+                  Container(
+                    decoration: _isDeveloper
+                        ? BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            color: Colors.blueGrey.withValues(alpha: 0.1),
+                          )
+                        : null,
+                    padding: const EdgeInsets.all(8),
+                    child: Image.asset(
+                      'assets/icons/icon.png',
+                      width: 60,
+                      height: 60,
                     ),
                   ),
+                  // 🔧 CORRECTED: Client indicator only for non-JV Almacis users
+                  if (_isClient && _organization != 'JV Almacis')
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.8),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'Client',
+                          style: GoogleFonts.poppins(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              // Show selected organization for service providers managing client organizations
+              if (!_isClient && widget.selectedOrganizationName != null && widget.selectedOrganizationName!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blueGrey[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Managing: ${widget.selectedOrganizationName}',
+                    style: GoogleFonts.poppins(
+                      color: Colors.blueGrey[700],
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
                 ),
+              ],
             ],
           ),
         ),

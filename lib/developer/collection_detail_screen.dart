@@ -34,7 +34,7 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   String? _selectedOrganization;
   
-  // Cache for organizations
+  // Cache for organizations - INCLUDES JV Almacis for backend operations
   List<String> _availableOrganizations = [];
   bool _organizationsLoaded = false;
 
@@ -44,29 +44,29 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
     _loadOrganizations();
   }
 
-  // 🔧 FIXED: Load organizations with better error handling and fallback
+  // 🔧 CORRECTED: Load ALL organizations INCLUDING JV Almacis for backend operations
   Future<void> _loadOrganizations() async {
     try {
-      // Try to load from Organizations collection first
+      // Load from Organizations collection first
       final snapshot = await _firestore
           .collection('Organizations')
           .where('isActive', isEqualTo: true)
-          .get(); // Removed orderBy to avoid index requirement initially
-      
+          .get();
+    
       if (snapshot.docs.isNotEmpty) {
         final orgs = snapshot.docs
             .map((doc) => doc.data()['name'] as String)
-            .toList();
-        
+            .toList(); // 🔧 KEEP ALL organizations including JV Almacis for backend
+      
         // Sort manually to avoid index requirement
         orgs.sort();
-        
+      
         setState(() {
           _availableOrganizations = orgs;
           _organizationsLoaded = true;
         });
-        
-        logger.i('Loaded ${_availableOrganizations.length} organizations from Firestore');
+      
+        logger.i('Loaded ${_availableOrganizations.length} organizations from Firestore (including JV Almacis for backend operations)');
       } else {
         // If no organizations found, use defaults
         _setDefaultOrganizations();
@@ -80,13 +80,13 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
 
   void _setDefaultOrganizations() {
     setState(() {
-      _availableOrganizations = ['Embassy', 'JV Almacis'];
+      _availableOrganizations = ['Embassy', 'JV Almacis']; // 🔧 INCLUDE JV Almacis in defaults
       _organizationsLoaded = true;
     });
-    logger.i('Using default organizations');
+    logger.i('Using default organizations (including JV Almacis for backend operations)');
   }
 
-  // 🔧 FIXED: Add new organization with better error handling
+  // Add new organization
   Future<void> _addOrganization() async {
     if (_organizationNameController.text.trim().isEmpty) {
       _showSnackBar('Please enter an organization name');
@@ -105,7 +105,6 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
         return;
       }
 
-      // Add the organization
       await _firestore.collection('Organizations').add({
         'name': _organizationNameController.text.trim(),
         'description': _organizationDescriptionController.text.trim(),
@@ -123,7 +122,6 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
       await _loadOrganizations();
       
       _showSnackBar('Organization added successfully!');
-      logger.i('Organization added successfully: ${_organizationNameController.text.trim()}');
     } catch (e) {
       logger.e('Error adding organization: $e');
       _showSnackBar('Error adding organization: $e');
@@ -445,7 +443,7 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
     _usernameController.text = currentData['username'] ?? '';
     _emailController.text = currentData['email'] ?? '';
     
-    // Use dynamic organizations
+    // Use dynamic organizations INCLUDING JV Almacis
     String currentOrg = currentData['organization'] ?? '-';
     
     // If current organization is not in the options and it's not '-', set to null
@@ -481,6 +479,7 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
                 ),
                 if (collection != 'Developers') ...[
                   const SizedBox(height: 12),
+                  // 🔧 CORRECTED: Use ALL organizations INCLUDING JV Almacis
                   DropdownButtonFormField<String>(
                     value: _selectedOrganization,
                     decoration: InputDecoration(
@@ -696,6 +695,7 @@ class CollectionDetailScreenState extends State<CollectionDetailScreen> {
                 ),
                 if (collection == 'Admins' || collection == 'Technicians') ...[
                   const SizedBox(height: 12),
+                  // 🔧 CORRECTED: Use ALL organizations INCLUDING JV Almacis
                   DropdownButtonFormField<String>(
                     value: _selectedOrganization,
                     decoration: InputDecoration(

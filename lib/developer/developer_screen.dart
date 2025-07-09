@@ -48,7 +48,7 @@ class DeveloperScreenState extends State<DeveloperScreen> {
                   ),
                   const SizedBox(height: 20),
                   
-                  // 🔧 NEW: Organizations management
+                  // Organizations management 
                   ListTile(
                     leading: const Icon(Icons.business, color: Colors.blueGrey),
                     title: const Text('Organizations'),
