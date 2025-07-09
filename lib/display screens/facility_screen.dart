@@ -9,12 +9,16 @@ class FacilityScreen extends StatefulWidget {
   final String? selectedFacilityId;
   final void Function(String) onFacilitySelected;
   final bool isSelectionActive;
+  final String? userOrganization; // User's organization for filtering
+  final bool isServiceProvider; // Whether user is a service provider
 
   const FacilityScreen({
     super.key,
     required this.selectedFacilityId,
     required this.onFacilitySelected,
     required this.isSelectionActive,
+    this.userOrganization,
+    this.isServiceProvider = false,
   });
 
   @override
@@ -38,6 +42,43 @@ class FacilityScreenState extends State<FacilityScreen> {
     super.dispose();
   }
 
+  // Get user's organization for facility creation
+  Future<String> _getUserOrganization() async {
+    if (widget.userOrganization != null && widget.userOrganization!.isNotEmpty && widget.userOrganization != '-') {
+      return widget.userOrganization!;
+    }
+
+    // Fallback: get organization from user data
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return 'Embassy'; // Default fallback
+
+    try {
+      // Check Technicians collection first
+      final technicianDoc = await FirebaseFirestore.instance
+          .collection('Technicians')
+          .doc(user.uid)
+          .get();
+
+      if (technicianDoc.exists) {
+        return technicianDoc.data()?['organization'] ?? 'Embassy';
+      }
+
+      // Check Users collection
+      final userDoc = await FirebaseFirestore.instance
+          .collection('Users')
+          .doc(user.uid)
+          .get();
+
+      if (userDoc.exists) {
+        return userDoc.data()?['organization'] ?? 'Embassy';
+      }
+    } catch (e) {
+      logger.e('Error getting user organization: $e');
+    }
+
+    return 'Embassy'; // Default fallback
+  }
+
   Future<void> _addFacility() async {
     if (_formKey.currentState!.validate()) {
       try {
@@ -48,11 +89,17 @@ class FacilityScreenState extends State<FacilityScreen> {
           );
           return;
         }
+
+        // Get organization for the facility
+        final organizationForFacility = await _getUserOrganization();
+        logger.i('Creating facility with organization: $organizationForFacility');
+
         final facility = Facility(
           id: '',
           name: _nameController.text.trim(),
           location: _locationController.text.trim(),
           address: _addressController.text.trim().isNotEmpty ? _addressController.text.trim() : null,
+          organization: organizationForFacility, // Include organization
           createdAt: DateTime.now(),
           createdBy: user.uid,
         );
@@ -65,7 +112,7 @@ class FacilityScreenState extends State<FacilityScreen> {
         setState(() {
           _isAddingFacility = false;
         });
-        logger.i('Facility added: ${ref.id}');
+        logger.i('Facility added: ${ref.id} with organization: $organizationForFacility');
         if (mounted) {
           _messengerKey.currentState?.showSnackBar(
             SnackBar(content: Text('Facility added successfully', style: GoogleFonts.poppins())),
@@ -80,6 +127,22 @@ class FacilityScreenState extends State<FacilityScreen> {
         }
       }
     }
+  }
+
+  // 🔧 UPDATED: Build query based on user type and organization
+  Stream<QuerySnapshot<Map<String, dynamic>>> _buildFacilitiesStream() {
+    Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('Facilities');
+
+    // Filter by organization if user is not a service provider or if specific organization is selected
+    if (widget.userOrganization != null && widget.userOrganization!.isNotEmpty && widget.userOrganization != '-') {
+      query = query.where('organization', isEqualTo: widget.userOrganization);
+      logger.i('Filtering facilities by organization: ${widget.userOrganization}');
+    }
+
+    // Order by createdAt descending
+    query = query.orderBy('createdAt', descending: true);
+
+    return query.snapshots();
   }
 
   @override
@@ -104,7 +167,9 @@ class FacilityScreenState extends State<FacilityScreen> {
                 children: [
                   // Header section
                   Text(
-                    'Your Facilities',
+                    widget.isServiceProvider && widget.userOrganization != null 
+                        ? '${widget.userOrganization} Facilities' // Show organization name for service providers
+                        : 'Your Facilities',
                     style: GoogleFonts.poppins(
                       fontSize: isMobile ? 20 : 24,
                       fontWeight: FontWeight.bold,
@@ -119,15 +184,31 @@ class FacilityScreenState extends State<FacilityScreen> {
                       color: Colors.blueGrey[600],
                     ),
                   ),
+                  // Show organization info if applicable
+                  if (widget.userOrganization != null && widget.userOrganization!.isNotEmpty && widget.userOrganization != '-') ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blueGrey[100],
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        'Organization: ${widget.userOrganization}',
+                        style: GoogleFonts.poppins(
+                          fontSize: isMobile ? 12 : 14,
+                          color: Colors.blueGrey[700],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   
                   // Main content area
                   Expanded(
                     child: StreamBuilder<QuerySnapshot>(
-                      stream: FirebaseFirestore.instance
-                          .collection('Facilities')
-                          .orderBy('createdAt', descending: true)
-                          .snapshots(),
+                      stream: _buildFacilitiesStream(), // Use the updated stream method
                       builder: (context, snapshot) {
                         if (snapshot.connectionState == ConnectionState.waiting) {
                           return const Center(
@@ -160,7 +241,9 @@ class FacilityScreenState extends State<FacilityScreen> {
                                 ),
                                 const SizedBox(height: 16),
                                 Text(
-                                  'No facilities added yet',
+                                  widget.userOrganization != null && widget.userOrganization!.isNotEmpty && widget.userOrganization != '-'
+                                      ? 'No facilities found for ${widget.userOrganization}' // Organization-specific message
+                                      : 'No facilities added yet',
                                   style: GoogleFonts.poppins(
                                     fontSize: isMobile ? 16 : 18,
                                     color: Colors.blueGrey[600],
@@ -188,6 +271,41 @@ class FacilityScreenState extends State<FacilityScreen> {
                                 key: _formKey,
                                 child: Column(
                                   children: [
+                                    // Show organization info in form
+                                    if (widget.userOrganization != null && widget.userOrganization!.isNotEmpty && widget.userOrganization != '-') ...[
+                                      Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blueGrey[50],
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: Colors.blueGrey[200]!),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Organization',
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w500,
+                                                color: Colors.blueGrey[700],
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              widget.userOrganization!,
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.blueGrey[800],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(height: 16),
+                                    ],
                                     TextFormField(
                                       controller: _nameController,
                                       decoration: InputDecoration(
@@ -273,7 +391,7 @@ class FacilityScreenState extends State<FacilityScreen> {
                         final facilities = docs
                             .map((doc) => Facility.fromFirestore(doc))
                             .toList();
-                        logger.i('Fetched ${facilities.length} facilities from Firestore');
+                        logger.i('Fetched ${facilities.length} facilities from Firestore for organization: ${widget.userOrganization ?? 'all'}');
 
                         return ListView.builder(
                           itemCount: facilities.length,
@@ -287,7 +405,7 @@ class FacilityScreenState extends State<FacilityScreen> {
                                   ? () {
                                       widget.onFacilitySelected(facility.id);
                                       logger.i(
-                                        'Selected facility: ${facility.name}, ID: ${facility.id}',
+                                        'Selected facility: ${facility.name}, ID: ${facility.id}, Organization: ${facility.organization}',
                                       );
                                     }
                                   : null,
@@ -307,17 +425,43 @@ class FacilityScreenState extends State<FacilityScreen> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        facility.name,
-                                        style: GoogleFonts.poppins(
-                                          fontSize: isMobile ? 16 : 18,
-                                          fontWeight: FontWeight.bold,
-                                          color: isSelected
-                                              ? Colors.white
-                                              : isInteractable
-                                                  ? Colors.blueGrey[800]
-                                                  : Colors.grey[600],
-                                        ),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              facility.name,
+                                              style: GoogleFonts.poppins(
+                                                fontSize: isMobile ? 16 : 18,
+                                                fontWeight: FontWeight.bold,
+                                                color: isSelected
+                                                    ? Colors.white
+                                                    : isInteractable
+                                                        ? Colors.blueGrey[800]
+                                                        : Colors.grey[600],
+                                              ),
+                                            ),
+                                          ),
+                                          // Show organization badge
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: isSelected 
+                                                  ? Colors.white.withValues(alpha: 0.2)
+                                                  : Colors.blueGrey[100],
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                            child: Text(
+                                              facility.organization,
+                                              style: GoogleFonts.poppins(
+                                                fontSize: isMobile ? 10 : 12,
+                                                fontWeight: FontWeight.w500,
+                                                color: isSelected
+                                                    ? Colors.white.withValues(alpha: 0.9)
+                                                    : Colors.blueGrey[700],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                       const SizedBox(height: 4),
                                       Text(

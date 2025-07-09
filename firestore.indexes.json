@@ -879,23 +879,13 @@
       ]
     },
     {
-      "collectionGroup": "Organizations",
+      "collectionGroup": "Facilities",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "isActive",
+          "fieldPath": "organization",
           "order": "ASCENDING"
         },
-        {
-          "fieldPath": "name",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "Organizations",
-      "queryScope": "COLLECTION",
-      "fields": [
         {
           "fieldPath": "createdAt",
           "order": "DESCENDING"

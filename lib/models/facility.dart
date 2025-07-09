@@ -5,6 +5,7 @@ class Facility {
   final String name;
   final String location;
   final String? address;
+  final String organization;
   final DateTime createdAt;
   final String createdBy;
 
@@ -13,6 +14,7 @@ class Facility {
     required this.name,
     required this.location,
     this.address,
+    required this.organization,
     required this.createdAt,
     required this.createdBy,
   });
@@ -24,6 +26,7 @@ class Facility {
       name: data['name'] ?? '',
       location: data['location'] ?? '',
       address: data['address'],
+      organization: data['organization'] ?? 'Embassy', 
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       createdBy: data['createdBy'] ?? '',
     );
@@ -34,6 +37,7 @@ class Facility {
       'name': name,
       'location': location,
       'address': address,
+      'organization': organization,
       'createdAt': Timestamp.fromDate(createdAt),
       'createdBy': createdBy,
     };

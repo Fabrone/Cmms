@@ -1,9 +1,10 @@
-import 'package:cmms/display%20screens/google_maps_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:logger/logger.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:cmms/models/facility.dart';
 import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 
@@ -18,74 +19,56 @@ class LocationsScreen extends StatefulWidget {
 
 class _LocationsScreenState extends State<LocationsScreen> {
   final Logger _logger = Logger(printer: PrettyPrinter());
-
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _locationController = TextEditingController();
-  final TextEditingController _addressController = TextEditingController();
+  String? _userOrganization;
+  bool _isDeveloper = false;
+  bool _isJVAlmacisUser = false;
 
   @override
   void initState() {
     super.initState();
-    _logger.i('Initializing LocationsScreen, facilityId: ${widget.facilityId}, user: ${FirebaseAuth.instance.currentUser?.uid}');
+    _initializeUserData();
   }
 
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _locationController.dispose();
-    _addressController.dispose();
-    super.dispose();
-    _logger.i('Disposed LocationsScreen');
-  }
-
-  /// Adds a new facility to Firestore.
-  Future<void> _addFacility() async {
-    if (_nameController.text.trim().isEmpty || _locationController.text.trim().isEmpty) {
-      _showSnackBar('Please fill in all required fields');
-      return;
-    }
-
+  /// Initialize user data and organization
+  Future<void> _initializeUserData() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        _showSnackBar('User not authenticated');
-        _logger.w('User not authenticated for adding facility');
+      if (user == null) return;
+
+      // Check if user is developer
+      final developerDoc = await FirebaseFirestore.instance
+          .collection('Developers')
+          .doc(user.uid)
+          .get();
+      
+      if (developerDoc.exists) {
+        setState(() {
+          _isDeveloper = true;
+        });
+        _logger.i('User is developer');
         return;
       }
 
-      final facility = Facility(
-        id: '',
-        name: _nameController.text.trim(),
-        location: _locationController.text.trim(),
-        address: _addressController.text.trim().isEmpty ? null : _addressController.text.trim(),
-        createdAt: DateTime.now(),
-        createdBy: user.uid,
-      );
+      // Get user organization
+      final userDoc = await FirebaseFirestore.instance
+          .collection('Users')
+          .doc(user.uid)
+          .get();
 
-      await FirebaseFirestore.instance
-          .collection('Facilities')
-          .add(facility.toFirestore());
-
-      if (!mounted) return;
-
-      _showSnackBar('Facility added successfully');
-      _logger.i('Facility added: ${facility.name}, facilityId: ${widget.facilityId}');
-      _clearForm();
-      Navigator.pop(context);
-    } catch (e, stackTrace) {
-      _logger.e('Error adding facility: $e', stackTrace: stackTrace);
-      _showSnackBar('Error adding facility: $e');
+      if (userDoc.exists) {
+        final organization = userDoc.data()?['organization'] as String?;
+        setState(() {
+          _userOrganization = organization;
+          _isJVAlmacisUser = organization == 'JV Almacis';
+        });
+        _logger.i('User organization: $organization, isJVAlmacis: $_isJVAlmacisUser');
+      }
+    } catch (e) {
+      _logger.e('Error initializing user data: $e');
     }
   }
 
-  /// Clears the form fields.
-  void _clearForm() {
-    _nameController.clear();
-    _locationController.clear();
-    _addressController.clear();
-  }
-
-  /// Shows a snackbar with the given message.
+  /// Shows a snackbar with the given message
   void _showSnackBar(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -94,79 +77,73 @@ class _LocationsScreenState extends State<LocationsScreen> {
     }
   }
 
-  /// Displays a dialog for adding a new facility.
-  void _showAddFacilityDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Add New Facility',
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.bold,
-            color: Colors.blueGrey[800],
-          ),
+  /// Opens Google Maps with directions from current location to facility
+  Future<void> _openDirections(String facilityName, String facilityLocation) async {
+    try {
+      // Request location permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          _showSnackBar('Location permission denied');
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        _showSnackBar('Location permissions are permanently denied');
+        return;
+      }
+
+      // Get current position with updated LocationSettings
+      final Position position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 10,
         ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _nameController,
-                decoration: InputDecoration(
-                  labelText: 'Facility Name *',
-                  border: const OutlineInputBorder(),
-                  labelStyle: GoogleFonts.poppins(),
-                ),
-                style: GoogleFonts.poppins(),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _locationController,
-                decoration: InputDecoration(
-                  labelText: 'Location *',
-                  hintText: 'e.g., Nairobi, Mombasa, Kisumu',
-                  border: const OutlineInputBorder(),
-                  labelStyle: GoogleFonts.poppins(),
-                ),
-                style: GoogleFonts.poppins(),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _addressController,
-                decoration: InputDecoration(
-                  labelText: 'Address (Optional)',
-                  border: const OutlineInputBorder(),
-                  labelStyle: GoogleFonts.poppins(),
-                ),
-                style: GoogleFonts.poppins(),
-                maxLines: 2,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              _clearForm();
-              Navigator.pop(context);
-            },
-            child: Text('Cancel', style: GoogleFonts.poppins()),
-          ),
-          ElevatedButton(
-            onPressed: _addFacility,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blueGrey,
-              foregroundColor: Colors.white,
-            ),
-            child: Text('Add Facility', style: GoogleFonts.poppins()),
-          ),
-        ],
-      ),
-    );
+      );
+
+      // Create Google Maps directions URL
+      final String googleMapsUrl = 
+          'https://www.google.com/maps/dir/${position.latitude},${position.longitude}/$facilityLocation';
+
+      final Uri url = Uri.parse(googleMapsUrl);
+      
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+        _logger.i('Opened directions to $facilityName at $facilityLocation');
+      } else {
+        _showSnackBar('Could not open Google Maps');
+      }
+    } catch (e) {
+      _logger.e('Error opening directions: $e');
+      _showSnackBar('Error getting directions: $e');
+    }
   }
 
-  /// Shows a dialog with facility details.
-  void _showFacilityDetails(Facility facility) {
+  /// Opens Google Maps showing facility location
+  Future<void> _openLocation(String facilityName, String facilityLocation) async {
+    try {
+      // Create Google Maps location URL
+      final String googleMapsUrl = 
+          'https://www.google.com/maps/search/?api=1&query=$facilityLocation';
+
+      final Uri url = Uri.parse(googleMapsUrl);
+      
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+        _logger.i('Opened location for $facilityName at $facilityLocation');
+      } else {
+        _showSnackBar('Could not open Google Maps');
+      }
+    } catch (e) {
+      _logger.e('Error opening location: $e');
+      _showSnackBar('Error opening location: $e');
+    }
+  }
+
+  /// Shows facility location options dialog
+  void _showLocationOptions(Facility facility) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -181,31 +158,62 @@ class _LocationsScreenState extends State<LocationsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildDetailRow(Icons.location_on, 'Location', facility.location),
-            if (facility.address != null) ...[
-              const SizedBox(height: 12),
-              _buildDetailRow(Icons.home, 'Address', facility.address!),
-            ],
-            const SizedBox(height: 12),
-            _buildDetailRow(
-              Icons.calendar_today,
-              'Created',
-              '${facility.createdAt.day}/${facility.createdAt.month}/${facility.createdAt.year}',
+            Row(
+              children: [
+                Icon(Icons.location_on, color: Colors.blueGrey[700], size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    facility.location,
+                    style: GoogleFonts.poppins(fontSize: 16),
+                  ),
+                ),
+              ],
             ),
+            if (facility.address != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.home, color: Colors.blueGrey[700], size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      facility.address!,
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Close', style: GoogleFonts.poppins()),
+            child: Text('Cancel', style: GoogleFonts.poppins()),
           ),
           ElevatedButton.icon(
             onPressed: () {
               Navigator.pop(context);
-              _openGoogleMaps(facility.name, facility.location);
+              _openLocation(facility.name, facility.location);
             },
-            icon: const Icon(Icons.map),
-            label: Text('View on Map', style: GoogleFonts.poppins()),
+            icon: const Icon(Icons.place),
+            label: Text('Location', style: GoogleFonts.poppins()),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _openDirections(facility.name, facility.location);
+            },
+            icon: const Icon(Icons.directions),
+            label: Text('Directions', style: GoogleFonts.poppins()),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green,
               foregroundColor: Colors.white,
@@ -216,73 +224,16 @@ class _LocationsScreenState extends State<LocationsScreen> {
     );
   }
 
-  /// Builds a row for displaying facility details.
-  Widget _buildDetailRow(IconData icon, String label, String value) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, color: Colors.blueGrey[700], size: 20),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              Text(
-                value,
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Opens Google Maps screen for the given facility.
-  void _openGoogleMaps(String facilityName, String location) async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => GoogleMapsScreen(
-          facilityName: facilityName,
-          initialLocation: location,
-        ),
-      ),
-    );
-
-    if (result != null && mounted) {
-      _showSnackBar('Map configuration updated for $facilityName');
-      _logger.i('Map updated for $facilityName');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    _logger.d('Building LocationsScreen, facilityId: ${widget.facilityId}');
     return ResponsiveScreenWrapper(
       title: 'Locations',
       facilityId: widget.facilityId,
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddFacilityDialog,
-        backgroundColor: Colors.blueGrey,
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
       child: _buildBody(),
     );
   }
 
-  /// Builds the main content of the screen.
+  /// Builds the main content of the screen
   Widget _buildBody() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -290,11 +241,19 @@ class _LocationsScreenState extends State<LocationsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Facilities',
+            'Facility Locations',
             style: GoogleFonts.poppins(
               fontSize: 24,
               fontWeight: FontWeight.bold,
               color: Colors.blueGrey[800],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'View facility locations and get directions',
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              color: Colors.grey[600],
             ),
           ),
           const SizedBox(height: 16),
@@ -304,13 +263,20 @@ class _LocationsScreenState extends State<LocationsScreen> {
     );
   }
 
-  /// Builds the list of facilities using StreamBuilder.
+  /// Builds the list of facilities with organization-based filtering
   Widget _buildFacilitiesList() {
+    // Build query based on user type
+    Query<Map<String, dynamic>> query = FirebaseFirestore.instance
+        .collection('Facilities')
+        .orderBy('createdAt', descending: true);
+
+    // Apply organization filter for non-developer, non-JV Almacis users
+    if (!_isDeveloper && !_isJVAlmacisUser && _userOrganization != null) {
+      query = query.where('organization', isEqualTo: _userOrganization);
+    }
+
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('Facilities')
-          .orderBy('createdAt', descending: true)
-          .snapshots(),
+      stream: query.snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -333,7 +299,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Error: ${snapshot.error}',
+                  'Please check your permissions and try again',
                   style: GoogleFonts.poppins(
                     color: Colors.grey[500],
                     fontSize: 12,
@@ -367,10 +333,13 @@ class _LocationsScreenState extends State<LocationsScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Tap the + button to add your first facility',
+                  _isDeveloper || _isJVAlmacisUser
+                      ? 'No facilities have been added yet'
+                      : 'No facilities found for your organization',
                   style: GoogleFonts.poppins(
                     color: Colors.grey[500],
                   ),
+                  textAlign: TextAlign.center,
                 ),
               ],
             ),
@@ -388,7 +357,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
     );
   }
 
-  /// Builds a tile for a single facility.
+  /// Builds a tile for a single facility
   Widget _buildFacilityTile(Facility facility) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -445,21 +414,43 @@ class _LocationsScreenState extends State<LocationsScreen> {
                 ],
               ),
             ],
+            if (_isDeveloper || _isJVAlmacisUser) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(Icons.business, size: 16, color: Colors.grey[600]),
+                  const SizedBox(width: 4),
+                  Text(
+                    facility.organization,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
-              onPressed: () => _openGoogleMaps(facility.name, facility.location),
-              icon: const Icon(Icons.map),
-              tooltip: 'View on Map',
+              onPressed: () => _openDirections(facility.name, facility.location),
+              icon: const Icon(Icons.directions),
+              tooltip: 'Get Directions',
               color: Colors.green[700],
             ),
-            const Icon(Icons.arrow_forward_ios, size: 16),
+            IconButton(
+              onPressed: () => _openLocation(facility.name, facility.location),
+              icon: const Icon(Icons.place),
+              tooltip: 'View Location',
+              color: Colors.blue[700],
+            ),
           ],
         ),
-        onTap: () => _showFacilityDetails(facility),
+        onTap: () => _showLocationOptions(facility),
       ),
     );
   }

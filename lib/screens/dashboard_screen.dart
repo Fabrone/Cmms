@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cmms/display%20screens/facility_screen.dart';
+import 'package:cmms/screens/organization_selection_screen.dart'; // 🔧 NEW: Import organization selection screen
 import 'package:cmms/widgets/responsive_screen_wrapper.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/authentication/login_screen.dart';
@@ -28,7 +29,10 @@ class DashboardScreenState extends State<DashboardScreen> {
   String _organization = '-';
   bool _isClient = false;
   String? _selectedFacilityId;
+  String? _selectedOrganizationId; // 🔧 NEW: Track selected organization
+  String? _selectedOrganizationName; // 🔧 NEW: Track selected organization name
   bool _isFacilitySelectionActive = true;
+  bool _isOrganizationSelectionActive = false; // 🔧 NEW: Track organization selection state
   List<StreamSubscription<DocumentSnapshot>> _roleSubscriptions = [];
   final List<StreamSubscription<DocumentSnapshot>> _organizationSubscriptions = [];
 
@@ -141,8 +145,20 @@ class DashboardScreenState extends State<DashboardScreen> {
           if (orgFromCheck != '-') {
             _organization = orgFromCheck;
           }
+          
+          // 🔧 NEW: Set organization selection state based on user type
+          if (!isClient && orgFromCheck == 'JV Almacis') {
+            // JV Almacis users should select organization first
+            _isOrganizationSelectionActive = _selectedOrganizationId == null;
+            _isFacilitySelectionActive = _selectedOrganizationId != null && _selectedFacilityId == null;
+          } else {
+            // Client users go directly to facility selection
+            _isOrganizationSelectionActive = false;
+            _isFacilitySelectionActive = _selectedFacilityId == null;
+            _selectedOrganizationName = orgFromCheck; // Set their organization as selected
+          }
         });
-        logger.i('Updated client status: isClient=$isClient, org=$orgFromCheck');
+        logger.i('Updated client status: isClient=$isClient, org=$orgFromCheck, orgSelection=$_isOrganizationSelectionActive, facilitySelection=$_isFacilitySelectionActive');
       }
     } catch (e) {
       logger.e('Error checking client status: $e');
@@ -272,6 +288,17 @@ class DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  // 🔧 NEW: Handle organization selection
+  void _onOrganizationSelected(String organizationId, String organizationName) {
+    setState(() {
+      _selectedOrganizationId = organizationId;
+      _selectedOrganizationName = organizationName;
+      _isOrganizationSelectionActive = false;
+      _isFacilitySelectionActive = true;
+    });
+    logger.i('Selected organization: $organizationName (ID: $organizationId)');
+  }
+
   void _onFacilitySelected(String facilityId) {
     setState(() {
       _selectedFacilityId = facilityId;
@@ -295,22 +322,46 @@ class DashboardScreenState extends State<DashboardScreen> {
     setState(() {
       _selectedFacilityId = null;
       _isFacilitySelectionActive = true;
+      // 🔧 NEW: For JV Almacis users, also reset organization selection
+      if (!_isClient && _organization == 'JV Almacis') {
+        _selectedOrganizationId = null;
+        _selectedOrganizationName = null;
+        _isOrganizationSelectionActive = true;
+        _isFacilitySelectionActive = false;
+      }
     });
     _messengerKey.currentState?.showSnackBar(
       SnackBar(
         content: Text(
-          'Facilities refreshed',
+          _isClient ? 'Facilities refreshed' : 'Selection refreshed',
           style: GoogleFonts.poppins(),
         ),
         duration: const Duration(seconds: 1),
         backgroundColor: Colors.blueGrey[600],
       ),
     );
-    logger.i('Facilities view refreshed - showing facility selection interface');
+    logger.i('Selection view refreshed - showing ${_isClient ? 'facility' : 'organization'} selection interface');
   }
 
   void _handleBackNavigation() {
-    if (Navigator.canPop(context)) {
+    // 🔧 NEW: Handle back navigation for organization selection
+    if (_isOrganizationSelectionActive) {
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+        logger.i('Navigated back to previous screen from organization selection');
+      } else {
+        _showLogoutConfirmation();
+      }
+    } else if (_isFacilitySelectionActive && !_isClient && _selectedOrganizationId != null) {
+      // Go back to organization selection for JV Almacis users
+      setState(() {
+        _selectedOrganizationId = null;
+        _selectedOrganizationName = null;
+        _isOrganizationSelectionActive = true;
+        _isFacilitySelectionActive = false;
+      });
+      logger.i('Navigated back to organization selection');
+    } else if (Navigator.canPop(context)) {
       Navigator.pop(context);
       logger.i('Navigated back to previous screen');
     } else {
@@ -347,6 +398,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                 facilityId: _selectedFacilityId!,
                 currentRole: _currentRole,
                 organization: _organization,
+                selectedOrganizationName: _selectedOrganizationName, // 🔧 NEW: Pass selected organization name
                 onFacilityReset: _refreshFacilitiesView,
                 actions: [
                   if (_currentRole == 'Admin')
@@ -370,7 +422,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                 key: _scaffoldKey,
                 appBar: AppBar(
                   title: Text(
-                    'Select Facility',
+                    _isOrganizationSelectionActive ? 'Select Organization' : 'Select Facility',
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
@@ -436,10 +488,20 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildMainContent() {
+    // 🔧 NEW: Show organization selection for JV Almacis users
+    if (_isOrganizationSelectionActive) {
+      return OrganizationSelectionScreen(
+        onOrganizationSelected: _onOrganizationSelected,
+      );
+    }
+    
+    // Show facility selection
     return FacilityScreen(
       selectedFacilityId: _selectedFacilityId,
       onFacilitySelected: _onFacilitySelected,
       isSelectionActive: _isFacilitySelectionActive,
+      userOrganization: _isClient ? _organization : _selectedOrganizationName, // 🔧 NEW: Pass organization for filtering
+      isServiceProvider: !_isClient, // 🔧 NEW: Pass service provider status
     );
   }
 }
