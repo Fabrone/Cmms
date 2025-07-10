@@ -394,11 +394,11 @@ class DashboardScreenState extends State<DashboardScreen> {
         key: _messengerKey,
         child: isFacilitySelected
             ? ResponsiveScreenWrapper(
-                title: '$displayRole Dashboard',
+                title: displayRole == '-' ? 'Dashboard' : '$displayRole Dashboard',
                 facilityId: _selectedFacilityId!,
                 currentRole: _currentRole,
                 organization: _organization,
-                selectedOrganizationName: _selectedOrganizationName, // 🔧 NEW: Pass selected organization name
+                selectedOrganizationName: _selectedOrganizationName,
                 onFacilityReset: _refreshFacilitiesView,
                 actions: [
                   if (_currentRole == 'Admin')
@@ -500,8 +500,8 @@ class DashboardScreenState extends State<DashboardScreen> {
       selectedFacilityId: _selectedFacilityId,
       onFacilitySelected: _onFacilitySelected,
       isSelectionActive: _isFacilitySelectionActive,
-      userOrganization: _isClient ? _organization : _selectedOrganizationName, // 🔧 NEW: Pass organization for filtering
-      isServiceProvider: !_isClient, // 🔧 NEW: Pass service provider status
+      userOrganization: _isClient ? _organization : _selectedOrganizationName, 
+      isServiceProvider: !_isClient, 
     );
   }
 }
