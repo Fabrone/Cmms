@@ -58,7 +58,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String _currentRole = 'User';
   String _organization = '-';
-  bool _isDeveloper = false;
+  final bool _isDeveloper = false;
   bool _isClient = false;
   
   // Static variable to persist expansion state across widget rebuilds
@@ -179,7 +179,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           _isClient = isClient;
           _organization = orgFromCheck;
         });
-        _logger.i('Updated client status for ${widget.title}: isClient=$isClient, org=$orgFromCheck');
+        _logger.i('Updated client status: isClient=$isClient, org=$orgFromCheck');
       }
     } catch (e) {
       _logger.e('Error checking client status: $e');
@@ -222,7 +222,6 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
         String newRole = 'User';
         String newOrg = '-';
-        bool isDev = false;
 
         if (adminDoc.exists) {
           newRole = 'Admin';
@@ -232,7 +231,6 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         } else if (developerDoc.exists) {
           newRole = 'Technician';
           newOrg = 'JV Almacis';
-          isDev = true;
           _logger.i('User is Developer (displayed as Technician), org: $newOrg');
         } else if (technicianDoc.exists) {
           newRole = 'Technician';
@@ -250,9 +248,6 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           setState(() {
             _currentRole = newRole;
             _organization = newOrg;
-            _isDeveloper = isDev;
-            _logger.i(
-                'Updated state for ${widget.title}: role=$newRole, org=$newOrg, isDeveloper=$isDev');
           });
         }
 
@@ -260,7 +255,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         return;
       } catch (e, stackTrace) {
         _logger.e(
-            'Error getting user role on attempt $attempt for ${widget.title}: $e',
+            'Error getting user role and organization on attempt $attempt: $e',
             stackTrace: stackTrace);
         if (attempt < retries) {
           await Future.delayed(Duration(milliseconds: delayMs));
@@ -270,7 +265,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
             setState(() {});
           }
           _logger.e(
-              'Failed to fetch user role after $retries attempts for ${widget.title}');
+              'Failed to fetch user role and organization after $retries attempts');
         }
       }
     }
@@ -282,7 +277,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       return;
     }
 
-    _logger.i('App icon clicked on ${widget.title}, navigating to DeveloperScreen');
+    _logger.i('App icon clicked, navigating to DeveloperScreen');
 
     try {
       final screenWidth = MediaQuery.of(context).size.width;
@@ -290,7 +285,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
       if (isMobile && _scaffoldKey.currentState?.isDrawerOpen == true) {
         Navigator.pop(context);
-        _logger.i('Closed drawer before navigation on ${widget.title}');
+        _logger.i('Closed drawer before navigation');
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
@@ -299,7 +294,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           context,
           MaterialPageRoute(builder: (context) => const DeveloperScreen()),
         );
-        _logger.i('Successfully navigated to DeveloperScreen from ${widget.title}');
+        _logger.i('Successfully navigated to DeveloperScreen');
       }
     } catch (e) {
       _logger.e('Error navigating to DeveloperScreen: $e');
@@ -319,12 +314,13 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth <= 600;
+    final String appBarTitle = _organization == '-' ? 'Dashboard' : widget.title;
 
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
         title: Text(
-          widget.title,
+          appBarTitle,
           style: GoogleFonts.poppins(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -461,79 +457,93 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
     );
   }
 
+  // UPDATED: Dynamic menu access logic
+  List<String> _getMenuItemsForRole(String role, String organization) {
+    // Define menu items for JV Almacis (service provider)
+    final Map<String, List<String>> jvAlmacisMenus = {
+      'Admin': [
+        'Facilities',
+        'Locations',
+        'Building Information',
+        'Schedule Maintenance',
+        'Preventive Maintenance',
+        'Reports',
+        'Price Lists',
+        'Work on Request',
+        'Work Orders',
+        'Equipment Supplied',
+        'Inventory and Parts',
+        'Vendors',
+        'KPIs',
+        'Billing',
+        'Report',
+        'Settings'
+      ],
+      'Technician': [
+        'Facilities',
+        'Locations',
+        'Building Information',
+        'Preventive Maintenance',
+        'Schedule Maintenance',
+        'Reports',
+        'Price Lists',
+        'Work on Request',
+        'Work Orders',
+        'Equipment Supplied',
+        'Inventory and Parts',
+        'Billing',
+        'Report',
+        'Settings'
+      ],
+    };
+
+    // Define menu items for all other organizations (client organizations)
+    final Map<String, List<String>> clientOrganizationMenus = {
+      'Admin': [
+        'Facilities',
+        'Locations',
+        'Building Information',
+        'Schedule Maintenance',
+        'Preventive Maintenance',
+        'Reports',
+        'Work on Request',
+        'Work Orders',
+        'Billing',
+        'Report',
+        'Settings'
+      ],
+      'Technician': [
+        'Facilities',
+        'Locations',
+        'Building Information',
+        'Preventive Maintenance',
+        'Schedule Maintenance',
+        'Reports',
+        'Work on Request',
+        'Work Orders',
+        'Billing',
+        'Report',
+        'Settings'
+      ],
+    };
+
+    // User role always gets the same basic access regardless of organization
+    final List<String> userMenus = ['Facilities', 'Settings'];
+
+    // Return appropriate menu items based on role and organization
+    if (role == 'User' || organization == '-') {
+      return userMenus;
+    } else if (organization == 'JV Almacis') {
+      return jvAlmacisMenus[role] ?? userMenus;
+    } else {
+      // All other organizations get the client organization menus
+      return clientOrganizationMenus[role] ?? userMenus;
+    }
+  }
+
   List<Widget> _buildMenuItems() {
     final role = _currentRole;
     final org = _organization;
-
-    final Map<String, Map<String, List<String>>> roleMenuAccess = {
-      'Admin': {
-        'Embassy': [
-          'Facilities',
-          'Locations',
-          'Building Information',
-          'Schedule Maintenance',
-          'Preventive Maintenance',
-          'Reports',
-          'Work on Request',
-          'Work Orders',
-          'Billing',
-          'Report',
-          'Settings'
-        ],
-        'JV Almacis': [
-          'Facilities',
-          'Locations',
-          'Building Information',
-          'Schedule Maintenance',
-          'Preventive Maintenance',
-          'Reports',
-          'Price Lists',
-          'Work on Request',
-          'Work Orders',
-          'Equipment Supplied',
-          'Inventory and Parts',
-          'Vendors',
-          'KPIs',
-          'Billing',
-          'Report',
-          'Settings'
-        ],
-      },
-      'Technician': {
-        'Embassy': [
-          'Facilities',
-          'Locations',
-          'Building Information',
-          'Preventive Maintenance',
-          'Schedule Maintenance',
-          'Reports',
-          'Work on Request',
-          'Work Orders',
-          'Billing',
-          'Report',
-          'Settings'
-        ],
-        'JV Almacis': [
-          'Facilities',
-          'Locations',
-          'Building Information',
-          'Preventive Maintenance',
-          'Schedule Maintenance',
-          'Reports',
-          'Price Lists',
-          'Work on Request',
-          'Work Orders',
-          'Equipment Supplied',
-          'Inventory and Parts',
-          'Billing',
-          'Report',
-          'Settings'
-        ],
-      },
-      'User': {
-        '-': ['Facilities', 'Settings'],
-      },
-    };
 
     final menuStructure = [
       {'title': 'Facilities', 'icon': Icons.business, 'isSubItem': false},
@@ -560,8 +570,11 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       {'title': 'Drawings', 'icon': Icons.brush},
     ];
 
-    final allowedItems = roleMenuAccess[role]?[org] ?? roleMenuAccess['User']!['-']!;
+    // Use the new dynamic method to get allowed items
+    final allowedItems = _getMenuItemsForRole(role, org);
     final List<Widget> menuWidgets = [];
+
+    _logger.i('Building menu for role: $role, org: $org, allowed items: $allowedItems');
 
     for (var menuItem in menuStructure) {
       final itemTitle = menuItem['title'] as String;
@@ -573,7 +586,6 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       final isParent = menuItem['isParent'] as bool? ?? false;
 
       if (isParent && itemTitle == 'Building Information') {
-        // Add the parent Building Information item
         menuWidgets.add(
           ListTile(
             leading: Icon(icon, color: Colors.blueGrey),
@@ -591,7 +603,6 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           ),
         );
 
-        // Add sub-items if expanded
         if (_isBuildingInfoExpanded) {
           for (var subItem in buildingInfoSubItems) {
             final subTitle = subItem['title'] as String;
@@ -609,7 +620,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
                   ),
                 ),
                 onTap: () {
-                  _logger.i('Sub-menu item clicked: $subTitle, preserving expansion state');
+                  _logger.i('Sub-menu item clicked: $subTitle, expansion state preserved');
                   _handleSubMenuNavigation(subTitle);
                 },
               ),
@@ -617,11 +628,11 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           }
         }
       } else if (!isParent) {
-        // Add regular menu items (not Building Information sub-items)
         if (!['Building Survey', 'Documentations', 'Drawings'].contains(itemTitle)) {
           menuWidgets.add(
             ListTile(
-              contentPadding: isSubItem ? const EdgeInsets.only(left: 32.0, right: 16.0) : null,
+              contentPadding:
+                  isSubItem ? const EdgeInsets.only(left: 32.0, right: 16.0) : null,
               leading: Icon(icon, color: Colors.blueGrey),
               title: Text(itemTitle, style: GoogleFonts.poppins()),
               onTap: () => _handleMenuNavigation(itemTitle),
@@ -638,13 +649,11 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth <= 600;
     
-    // Only close drawer on mobile, DON'T change expansion state
     if (isMobile) {
       Navigator.pop(context);
       _logger.i('Closed drawer for sub-menu navigation to $title, expansion state preserved');
     }
 
-    // Validate facilityId before navigation
     if (widget.facilityId.isEmpty && !['Settings'].contains(title)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -661,22 +670,18 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
     final screenMap = {
       'Building Survey': () => BuildingSurveyScreen(
           facilityId: widget.facilityId, selectedSubSection: ''),
-      'Documentations': () => DocumentationsScreen(facilityId: widget.facilityId),
+      'Documentations': () =>
+          DocumentationsScreen(facilityId: widget.facilityId),
       'Drawings': () => DrawingsScreen(facilityId: widget.facilityId),
     };
 
     final screenBuilder = screenMap[title];
     if (screenBuilder != null) {
-      // Navigate without changing the expansion state
       Navigator.push(
         context,
         MaterialPageRoute(builder: (context) => screenBuilder()),
-      ).then((_) {
-        // When returning from navigation, ensure expansion state is preserved
-        _logger.i('Returned from $title screen, expansion state: $_isBuildingInfoExpanded');
-      });
-      
-      _logger.i('Navigated to sub-menu $title screen, facilityId: ${widget.facilityId}, expansion state preserved: $_isBuildingInfoExpanded');
+      );
+      _logger.i('Navigated to sub-menu $title screen, facilityId: ${widget.facilityId}');
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -700,15 +705,16 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(
-          builder: (context) => const DashboardScreen(facilityId: '', role: 'User'),
+          builder: (context) =>
+              const DashboardScreen(facilityId: '', role: 'User'),
         ),
         (route) => false,
       );
-      _logger.i('Navigated to DashboardScreen for facility selection, facilityId: ""');
+      _logger.i(
+          'Navigated to DashboardScreen for facility selection, facilityId: ""');
       return;
     }
 
-    // Validate facilityId before navigation
     if (widget.facilityId.isEmpty && !['Settings'].contains(title)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -724,15 +730,20 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
     final screenMap = {
       'Locations': () => LocationsScreen(facilityId: widget.facilityId),
-      'Schedule Maintenance': () => ScheduleMaintenanceScreen(facilityId: widget.facilityId),
-      'Preventive Maintenance': () => PreventiveMaintenanceScreen(facilityId: widget.facilityId),
+      'Schedule Maintenance': () =>
+          ScheduleMaintenanceScreen(facilityId: widget.facilityId),
+      'Preventive Maintenance': () =>
+          PreventiveMaintenanceScreen(facilityId: widget.facilityId),
       'Reports': () => ReportsScreen(facilityId: widget.facilityId),
       'Work on Request': () => RequestScreen(facilityId: widget.facilityId),
       'Work Orders': () => WorkOrderScreen(facilityId: widget.facilityId),
       'Price Lists': () => PriceListScreen(facilityId: widget.facilityId),
-      'Billing': () => BillingScreen(facilityId: widget.facilityId, userRole: _currentRole),
-      'Equipment Supplied': () => EquipmentSuppliedScreen(facilityId: widget.facilityId),
-      'Inventory and Parts': () => InventoryScreen(facilityId: widget.facilityId),
+      'Billing': () =>
+          BillingScreen(facilityId: widget.facilityId, userRole: _currentRole),
+      'Equipment Supplied': () =>
+          EquipmentSuppliedScreen(facilityId: widget.facilityId),
+      'Inventory and Parts': () =>
+          InventoryScreen(facilityId: widget.facilityId),
       'Vendors': () => VendorScreen(facilityId: widget.facilityId),
       'KPIs': () => KpiScreen(facilityId: widget.facilityId),
       'Report': () => ReportScreen(facilityId: widget.facilityId),
