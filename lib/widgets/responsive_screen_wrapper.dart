@@ -58,7 +58,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String _currentRole = 'User';
   String _organization = '-';
-  final bool _isDeveloper = false;
+  bool _isDeveloper = false; // 🔧 FIXED: Changed from final to mutable
   bool _isClient = false;
   
   // Static variable to persist expansion state across widget rebuilds
@@ -222,6 +222,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
         String newRole = 'User';
         String newOrg = '-';
+        bool isDeveloper = false; // 🔧 NEW: Track developer status
 
         if (adminDoc.exists) {
           newRole = 'Admin';
@@ -231,7 +232,8 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         } else if (developerDoc.exists) {
           newRole = 'Technician';
           newOrg = 'JV Almacis';
-          _logger.i('User is Developer (displayed as Technician), org: $newOrg');
+          isDeveloper = true; // 🔧 NEW: Set developer flag
+          _logger.i('User is Developer (displayed as Technician), org: $newOrg, isDeveloper: $isDeveloper');
         } else if (technicianDoc.exists) {
           newRole = 'Technician';
           final techData = technicianDoc.data();
@@ -248,7 +250,9 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
           setState(() {
             _currentRole = newRole;
             _organization = newOrg;
+            _isDeveloper = isDeveloper; // 🔧 NEW: Update developer flag
           });
+          _logger.i('Updated user status: role=$newRole, org=$newOrg, isDeveloper=$isDeveloper');
         }
 
         await _checkClientStatus();
@@ -277,7 +281,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       return;
     }
 
-    _logger.i('App icon clicked, navigating to DeveloperScreen');
+    _logger.i('App icon clicked by developer, navigating to DeveloperScreen');
 
     try {
       final screenWidth = MediaQuery.of(context).size.width;
@@ -400,6 +404,10 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
                         ? BoxDecoration(
                             borderRadius: BorderRadius.circular(8),
                             color: Colors.blueGrey.withValues(alpha: 0.1),
+                            border: Border.all(
+                              color: Colors.blueGrey.withValues(alpha: 0.3),
+                              width: 2,
+                            ),
                           )
                         : null,
                     padding: const EdgeInsets.all(8),
@@ -409,6 +417,27 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
                       height: 60,
                     ),
                   ),
+                  // 🔧 NEW: Developer indicator badge
+                  if (_isDeveloper)
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'DEV',
+                          style: GoogleFonts.poppins(
+                            color: Colors.white,
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
                   if (_isClient && _organization != 'JV Almacis')
                     Positioned(
                       bottom: 0,
@@ -431,6 +460,18 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
                     ),
                 ],
               ),
+              // 🔧 NEW: Developer hint text
+              if (_isDeveloper) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Tap for Developer Tools',
+                  style: GoogleFonts.poppins(
+                    color: Colors.blueGrey[600],
+                    fontSize: 10,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
               if (!_isClient && widget.selectedOrganizationName != null && widget.selectedOrganizationName!.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Container(
