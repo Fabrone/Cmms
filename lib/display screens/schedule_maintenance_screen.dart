@@ -116,7 +116,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['pdf', 'doc', 'docx', 'pptx', 'txt'],
+        allowedExtensions: ['pdf', 'doc', 'docx', 'pptx', 'txt', 'xls', 'xlsx'],
         withData: kIsWeb,
       );
       if (result == null || result.files.isEmpty) return;
@@ -332,6 +332,10 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
       case 'pptx':
         return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      case 'xls':
+        return 'application/vnd.ms-excel';
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
       case 'txt':
         return 'text/plain';
       default:
@@ -528,7 +532,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Task saved successfully', style: GoogleFonts.poppins())),
+          SnackBar(content: Text('Activity saved successfully', style: GoogleFonts.poppins())),
         );
       }
       logger.i('Saved task: ${task.toJson()}, facilityId: ${widget.facilityId}');
@@ -546,7 +550,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving task: $e', style: GoogleFonts.poppins())),
+          SnackBar(content: Text('Error saving activity: $e', style: GoogleFonts.poppins())),
         );
       }
       logger.e('Error saving task: $e');
@@ -590,6 +594,9 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       case 'doc':
       case 'docx':
         return Icons.description;
+      case 'xls':
+      case 'xlsx':
+        return Icons.table_chart;
       case 'pptx':
         return Icons.slideshow;
       default:
@@ -604,7 +611,10 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         return Colors.red[600]!;
       case 'doc':
       case 'docx':
-        return Colors.blueGrey[600]!;
+        return Colors.blue[600]!;
+      case 'xls':
+      case 'xlsx':
+        return Colors.green[600]!;
       case 'pptx':
         return Colors.orange[600]!;
       default:
@@ -615,22 +625,10 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
   @override
   Widget build(BuildContext context) {
     return ResponsiveScreenWrapper(
-      title: 'Schedule Maintenance',
+      title: 'Scope of Work/Activities',
       facilityId: widget.facilityId,
       currentRole: _currentRole,
       organization: _organization,
-      floatingActionButton: !_showScheduleForm
-          ? FloatingActionButton.extended(
-              onPressed: () => setState(() => _showScheduleForm = true),
-              backgroundColor: Colors.blueGrey[800],
-              icon: const Icon(Icons.add, color: Colors.white),
-              label: Text(
-                'Schedule New Task',
-                style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600),
-              ),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            )
-          : null,
       child: _buildBody(),
     );
   }
@@ -640,7 +638,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     final isMobile = screenWidth <= 600;
     final isTablet = screenWidth > 600 && screenWidth <= 900;
     final padding = isMobile ? 16.0 : isTablet ? 24.0 : 32.0;
-    final fontSizeTitle = isMobile ? 20.0 : isTablet ? 24.0 : 28.0;
+    final fontSizeTitle = isMobile ? 22.0 : isTablet ? 26.0 : 30.0;
     final fontSizeSubtitle = isMobile ? 14.0 : isTablet ? 16.0 : 18.0;
 
     return SingleChildScrollView(
@@ -649,46 +647,72 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (_showScheduleForm) _buildScheduleForm(),
+          
+          // Main content card with modern styling
           Card(
-            elevation: 4,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            elevation: 6,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: Padding(
               padding: EdgeInsets.all(padding),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Upload Document',
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.bold,
-                      fontSize: fontSizeTitle,
-                      color: Colors.blueGrey[900],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  isMobile
-                      ? Column(
-                          children: [
-                            _buildUploadButton(fontSizeSubtitle),
-                          ],
-                        )
-                      : Row(
-                          children: [
-                            Expanded(
-                              child: _buildUploadButton(fontSizeSubtitle),
-                            ),
-                          ],
+                  // Main title with modern styling
+                  Container(
+                    padding: const EdgeInsets.only(bottom: 20),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.blueGrey[50],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            Icons.work_outline,
+                            color: Colors.blueGrey[700],
+                            size: 28,
+                          ),
                         ),
-                  const SizedBox(height: 24),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Scope of Work/Activities',
+                                style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: fontSizeTitle,
+                                  color: Colors.blueGrey[900],
+                                ),
+                              ),
+                              Text(
+                                'Manage activity documents and schedules',
+                                style: GoogleFonts.poppins(
+                                  fontSize: fontSizeSubtitle - 2,
+                                  color: Colors.blueGrey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  // Activities Documents section
                   Text(
-                    'Uploaded Documents',
+                    'Activities Documents',
                     style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.bold,
-                      fontSize: fontSizeTitle,
-                      color: Colors.blueGrey[900],
+                      fontWeight: FontWeight.w600,
+                      fontSize: fontSizeTitle - 4,
+                      color: Colors.blueGrey[800],
                     ),
                   ),
                   const SizedBox(height: 16),
+                  
+                  // Documents list
                   StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
                         .collection('Schedule_Maintenance')
@@ -699,16 +723,48 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                     builder: (context, snapshot) {
                       if (snapshot.hasError) {
                         logger.e('StreamBuilder error: ${snapshot.error}');
-                        return Text('Error: ${snapshot.error}', style: GoogleFonts.poppins());
+                        return Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.red[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red[200]!),
+                          ),
+                          child: Text('Error: ${snapshot.error}', style: GoogleFonts.poppins(color: Colors.red[700])),
+                        );
                       }
                       if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
+                        return Container(
+                          padding: const EdgeInsets.all(32),
+                          child: const Center(child: CircularProgressIndicator()),
+                        );
                       }
                       final docs = snapshot.data?.docs ?? [];
                       if (docs.isEmpty) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8.0),
-                          child: Text('No documents uploaded yet', style: GoogleFonts.poppins()),
+                        return Container(
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey[200]!),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.folder_open,
+                                size: 48,
+                                color: Colors.grey[400],
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'No activity documents uploaded yet',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.grey[600],
+                                  fontSize: fontSizeSubtitle,
+                                ),
+                              ),
+                            ],
+                          ),
                         );
                       }
                       return ListView.builder(
@@ -719,16 +775,34 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                           final doc = docs[index];
                           final fileName = doc['fileName'] as String;
                           final downloadUrl = doc['downloadUrl'] as String;
-                          return Card(
-                            elevation: 2,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            margin: const EdgeInsets.symmetric(vertical: 6),
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.grey[200]!),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.grey.withValues(alpha: 0.1),
+                                  spreadRadius: 1,
+                                  blurRadius: 3,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ],
+                            ),
                             child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              leading: Icon(
-                                _getFileIcon(fileName),
-                                color: _getFileIconColor(fileName),
-                                size: isMobile ? 32 : 36,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              leading: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: _getFileIconColor(fileName).withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(
+                                  _getFileIcon(fileName),
+                                  color: _getFileIconColor(fileName),
+                                  size: isMobile ? 28 : 32,
+                                ),
                               ),
                               title: Text(
                                 fileName,
@@ -736,6 +810,13 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                                   color: Colors.blueGrey[900],
                                   fontWeight: FontWeight.w500,
                                   fontSize: fontSizeSubtitle,
+                                ),
+                              ),
+                              subtitle: Text(
+                                'Activity Document',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.blueGrey[600],
+                                  fontSize: fontSizeSubtitle - 2,
                                 ),
                               ),
                               trailing: PopupMenuButton<String>(
@@ -768,7 +849,7 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                                     ),
                                   ),
                                 ],
-                                icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
+                                icon: Icon(Icons.more_vert, color: Colors.blueGrey[600]),
                               ),
                             ),
                           );
@@ -776,6 +857,133 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                       );
                     },
                   ),
+                  
+                  const SizedBox(height: 32),
+                  
+                  // Action buttons section
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[200]!),
+                    ),
+                    child: isMobile
+                        ? Column(
+                            children: [
+                              // Upload Document Button
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: _uploadDocument,
+                                  icon: const Icon(Icons.upload_file, color: Colors.white),
+                                  label: Text(
+                                    'Upload Activity\nDocument',
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: fontSizeSubtitle - 1,
+                                      fontWeight: FontWeight.w600,
+                                      height: 1.2,
+                                    ),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green[700],
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    elevation: 2,
+                                  ),
+                                ),
+                              ),
+                              
+                              const SizedBox(height: 12),
+                              
+                              // Schedule New Activity Button
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () => setState(() => _showScheduleForm = true),
+                                  icon: const Icon(Icons.schedule, color: Colors.white),
+                                  label: Text(
+                                    'Schedule New\nActivity',
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: fontSizeSubtitle - 1,
+                                      fontWeight: FontWeight.w600,
+                                      height: 1.2,
+                                    ),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green[700],
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    elevation: 2,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          )
+                        : Row(
+                            children: [
+                              // Upload Document Button
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: _uploadDocument,
+                                  icon: const Icon(Icons.upload_file, color: Colors.white),
+                                  label: Text(
+                                    isTablet ? 'Upload Activity\nDocument' : 'Upload Activity Document',
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: isTablet ? fontSizeSubtitle - 1 : fontSizeSubtitle,
+                                      fontWeight: FontWeight.w600,
+                                      height: 1.2,
+                                    ),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green[700],
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: isTablet ? 12 : 20,
+                                      vertical: 16,
+                                    ),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    elevation: 2,
+                                  ),
+                                ),
+                              ),
+                              
+                              SizedBox(width: isTablet ? 12 : 16),
+                              
+                              // Schedule New Activity Button
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () => setState(() => _showScheduleForm = true),
+                                  icon: const Icon(Icons.schedule, color: Colors.white),
+                                  label: Text(
+                                    isTablet ? 'Schedule New\nActivity' : 'Schedule New Activity',
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: isTablet ? fontSizeSubtitle - 1 : fontSizeSubtitle,
+                                      fontWeight: FontWeight.w600,
+                                      height: 1.2,
+                                    ),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green[700],
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: isTablet ? 12 : 20,
+                                      vertical: 16,
+                                    ),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    elevation: 2,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                  )
                 ],
               ),
             ),
@@ -794,9 +1002,9 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
     final fontSizeInput = isMobile ? 14.0 : isTablet ? 16.0 : 18.0;
 
     return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      margin: EdgeInsets.all(padding),
+      elevation: 6,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      margin: EdgeInsets.only(bottom: padding),
       child: Padding(
         padding: EdgeInsets.all(padding),
         child: Column(
@@ -804,22 +1012,36 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
           children: [
             Row(
               children: [
-                Text(
-                  'Schedule New Task',
-                  style: GoogleFonts.poppins(
-                    fontSize: fontSizeTitle,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blueGrey[900],
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.add_task,
+                    color: Colors.green[700],
+                    size: 24,
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Schedule New Activity',
+                    style: GoogleFonts.poppins(
+                      fontSize: fontSizeTitle,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey[900],
+                    ),
+                  ),
+                ),
                 IconButton(
                   onPressed: () => setState(() => _showScheduleForm = false),
                   icon: const Icon(Icons.close, color: Colors.blueGrey),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             Form(
               key: _formKey,
               child: Column(
@@ -924,13 +1146,13 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
                         child: ElevatedButton(
                           onPressed: _saveTask,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blueGrey[800],
+                            backgroundColor: Colors.green[700],
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                           child: Text(
-                            'Save Task',
+                            'Save Activity',
                             style: GoogleFonts.poppins(color: Colors.white, fontSize: fontSizeInput),
                           ),
                         ),
@@ -971,10 +1193,10 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
+          borderSide: BorderSide(color: Colors.green[600]!, width: 2),
         ),
         filled: true,
-        fillColor: Colors.grey[100],
+        fillColor: Colors.grey[50],
         contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
       ),
@@ -982,22 +1204,6 @@ class ScheduleMaintenanceScreenState extends State<ScheduleMaintenanceScreen> {
       validator: validator,
       maxLines: maxLines ?? 1,
       keyboardType: keyboardType,
-    );
-  }
-
-  Widget _buildUploadButton(double fontSize) {
-    return ElevatedButton.icon(
-      onPressed: _uploadDocument,
-      icon: const Icon(Icons.upload_file, color: Colors.white),
-      label: Text(
-        'Select Document',
-        style: GoogleFonts.poppins(color: Colors.white, fontSize: fontSize),
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.blueGrey[800],
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
     );
   }
 }
