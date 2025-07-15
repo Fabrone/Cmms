@@ -506,7 +506,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'Facilities',
         'Locations',
         'Building Information',
-        'Schedule Maintenance',
+        'Scope of Work', // 🔧 UPDATED: Changed from 'Schedule Maintenance'
         'Preventive Maintenance',
         'Reports',
         'Price Lists',
@@ -525,7 +525,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'Locations',
         'Building Information',
         'Preventive Maintenance',
-        'Schedule Maintenance',
+        'Scope of Work', // 🔧 UPDATED: Changed from 'Schedule Maintenance'
         'Reports',
         'Price Lists',
         'Work on Request',
@@ -544,7 +544,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'Facilities',
         'Locations',
         'Building Information',
-        'Schedule Maintenance',
+        'Scope of Work', // 🔧 UPDATED: Changed from 'Schedule Maintenance'
         'Preventive Maintenance',
         'Reports',
         'Work on Request',
@@ -558,7 +558,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
         'Locations',
         'Building Information',
         'Preventive Maintenance',
-        'Schedule Maintenance',
+        'Scope of Work', // 🔧 UPDATED: Changed from 'Schedule Maintenance'
         'Reports',
         'Work on Request',
         'Work Orders',
@@ -590,7 +590,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       {'title': 'Facilities', 'icon': Icons.business, 'isSubItem': false},
       {'title': 'Locations', 'icon': Icons.location_on, 'isSubItem': false},
       {'title': 'Building Information', 'icon': Icons.info, 'isSubItem': false, 'isParent': true},
-      {'title': 'Schedule Maintenance', 'icon': Icons.event, 'isSubItem': false},
+      {'title': 'Scope of Work', 'icon': Icons.event, 'isSubItem': false}, // 🔧 UPDATED: Changed from 'Schedule Maintenance'
       {'title': 'Preventive Maintenance', 'icon': Icons.build_circle, 'isSubItem': false},
       {'title': 'Reports', 'icon': Icons.bar_chart, 'isSubItem': false},
       {'title': 'Work on Request', 'icon': Icons.request_page, 'isSubItem': false},
@@ -771,7 +771,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
 
     final screenMap = {
       'Locations': () => LocationsScreen(facilityId: widget.facilityId),
-      'Schedule Maintenance': () =>
+      'Scope of Work': () => // 🔧 UPDATED: Changed from 'Schedule Maintenance' but still navigates to ScheduleMaintenanceScreen
           ScheduleMaintenanceScreen(facilityId: widget.facilityId),
       'Preventive Maintenance': () =>
           PreventiveMaintenanceScreen(facilityId: widget.facilityId),

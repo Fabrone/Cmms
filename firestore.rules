@@ -1,62 +1,105 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Helper functions
+    function isTechnician() {
+      return request.auth != null && (
+        exists(/databases/$(database)/documents/Technicians/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/Users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/Users/$(request.auth.uid)).data.role == 'Technician')
+      );
+    }
+
+    function isAdmin() {
+      return request.auth != null && (
+        exists(/databases/$(database)/documents/Admins/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/Users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/Users/$(request.auth.uid)).data.role == 'Admin')
+      );
+    }
+
+    function isDeveloper() {
+      return request.auth != null &&
+         exists(/databases/$(database)/documents/Developers/$(request.auth.uid));
+    }
+
+    function getUserOrganization() {
+      return exists(/databases/$(database)/documents/Users/$(request.auth.uid)) ?
+        get(/databases/$(database)/documents/Users/$(request.auth.uid)).data.organization : '-';
+    }
+
+    function isJVAlmacisUser() {
+      return getUserOrganization() == 'JV Almacis';
+    }
+
+    // Organizations collection rules
+    match /Organizations/{organizationId} {
+      allow read: if request.auth != null;
+      allow write, update, delete: if isDeveloper() || isAdmin();
+    }
+
+    // 🔧 UPDATED: Facilities collection rules with organization-based access
+    match /Facilities/{facilityId} {
+      allow read: if request.auth != null && (
+        isDeveloper() || // Developers can read all facilities
+        isJVAlmacisUser() || // JV Almacis users can read all facilities (service providers)
+        (resource.data.organization == getUserOrganization() && getUserOrganization() != '-') || // Users can read facilities from their organization
+        (getUserOrganization() == '-' && exists(/databases/$(database)/documents/Users/$(request.auth.uid))) // Allow read for new users without organization
+      );
+      allow write: if request.auth != null && (
+        isDeveloper() || // Developers can create facilities for any organization
+        (isJVAlmacisUser() && request.resource.data.keys().hasAll(['organization'])) || // JV Almacis users can create facilities with organization
+        (!isJVAlmacisUser() && resource.data.organization == getUserOrganization()) // Other users can only create facilities for their organization
+      );
+      allow update: if request.auth != null && (
+        isDeveloper() || // Developers can update any facility
+        (isJVAlmacisUser()) || // JV Almacis users can update any facility (service providers)
+        resource.data.organization == getUserOrganization() // Users can update facilities from their organization
+      );
+      allow delete: if request.auth != null && (
+        isDeveloper() || // Developers can delete any facility
+        (isAdmin() && (isJVAlmacisUser() || resource.data.organization == getUserOrganization())) // Admins can delete facilities they have access to
+      );
+    }
+
     // Users: Allow users to manage their own data, Developers to read/write all, Admins to read and update specific fields
     match /Users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
-      allow read, write: if request.auth != null && 
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid));
-      allow read: if request.auth != null && (
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
-      );
-      allow update: if request.auth != null && (
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
-      ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'username', 'email', 'organization', 'createdAt']);
-    }
-
-    match /Facilities/{facilityId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isDeveloper();
+      allow read: if isAdmin() || (request.auth != null && request.auth.uid == userId); // Allow read for the user themselves
+      allow update: if isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'username', 'email', 'organization', 'createdAt']);
+      allow read: if isTechnician();
     }
 
     match /Developers/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
-      allow read: if request.auth != null && 
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid));
-      allow write: if request.auth != null && 
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid));
-      allow delete: if request.auth != null && 
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) &&
+      allow read: if isDeveloper();
+      allow read: if isAdmin() || isTechnician();
+      allow write: if isDeveloper();
+      allow delete: if isDeveloper() &&
         get(/databases/$(database)/documents/Developers/$(userId)).data.email != 'lubangafabron@gmail.com';
     }
 
     match /Admins/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
-      allow read: if request.auth != null && (
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
-      );
-      allow write: if request.auth != null && (
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
-      );
+      allow read: if isDeveloper() || isAdmin();
+      allow read: if isTechnician();
+      allow write: if isDeveloper() || isAdmin();
     }
 
     match /Technicians/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow read: if request.auth != null;
       allow write: if request.auth != null && (
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/Admins/$(request.auth.uid)).data.organization in ['Embassy', 'JV Almacis']
-        ||
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid))
+        (isAdmin()) ||
+        isDeveloper()
       );
     }
 
     match /admin_logs/{logId} {
-      allow read, write, delete: if request.auth != null && (
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
-      );
+      allow read, write, delete: if isDeveloper() || isAdmin();
     }
 
     match /Reports/{reportId} {
@@ -102,45 +145,39 @@ service cloud.firestore {
       allow update: if request.auth != null && (
         resource.data.userId == request.auth.uid ||
         resource.data.createdBy == request.auth.uid ||
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
+        isDeveloper() || isAdmin()
       );
       allow delete: if request.auth != null && (
         resource.data.userId == request.auth.uid ||
         resource.data.createdBy == request.auth.uid ||
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
+        isDeveloper() || isAdmin()
       );
     }
 
-    // NEW: Work Requests collection rules
     match /Work_Requests/{requestId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.resource.data.createdBy == request.auth.uid;
       allow update: if request.auth != null && (
         resource.data.createdBy == request.auth.uid ||
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Technicians/$(request.auth.uid))
+        isDeveloper() || isAdmin() || isTechnician()
       );
       allow delete: if request.auth != null && (
         resource.data.createdBy == request.auth.uid ||
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
+        isDeveloper() || isAdmin()
       );
     }
 
-    // Work Orders: Same structure as Work_Requests
     match /Work_Orders/{workOrderId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.resource.data.createdBy == request.auth.uid;
-      allow update: if request.auth != null && (resource.data.createdBy == request.auth.uid || 
-                    exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) || 
-                    exists(/databases/$(database)/documents/Admins/$(request.auth.uid)) || 
-                    exists(/databases/$(database)/documents/Technicians/$(request.auth.uid)));
-      allow delete: if request.auth != null && (resource.data.createdBy == request.auth.uid || 
-                    exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) || 
-                    exists(/databases/$(database)/documents/Admins/$(request.auth.uid)));
+      allow update: if request.auth != null && (
+        resource.data.createdBy == request.auth.uid ||
+        isDeveloper() || isAdmin() || isTechnician()
+      );
+      allow delete: if request.auth != null && (
+        resource.data.createdBy == request.auth.uid ||
+        isDeveloper() || isAdmin()
+      );
     }
 
     // Legacy nested structure (keeping for backward compatibility)
@@ -170,51 +207,33 @@ service cloud.firestore {
     }
 
     match /Maintenance_Tasks/{categoryId} {
-      allow read, write, update, delete: if request.auth != null && 
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid));
-      allow read: if request.auth != null && (
-        exists(/databases/$(database)/documents/Technicians/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
-      );
+      allow read, write, update, delete: if isDeveloper();
+      allow read: if isTechnician() || isAdmin();
     }
 
     match /Notifications/{notificationId} {
-      allow read, write: if request.auth != null && (
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
-      );
-      allow read: if request.auth != null && 
-        exists(/databases/$(database)/documents/Technicians/$(request.auth.uid));
+      allow read, write: if isDeveloper() || isAdmin();
+      allow read: if isTechnician();
     }
 
     match /Vendors/{vendorId} {
       allow read: if request.auth != null && (
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
+        isAdmin() || isDeveloper() ||
         get(/databases/$(database)/documents/Users/$(request.auth.uid)).data.facilities.hasAny([resource.data.facilityId])
       );
       allow write: if request.auth != null && (
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid))
+        isAdmin() || isDeveloper()
       ) && request.resource.data.facilityId in get(/databases/$(database)/documents/Users/$(request.auth.uid)).data.facilities;
     }
 
     match /TaskProgress/{taskId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && (
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Technicians/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
-      );
+      allow write: if isDeveloper() || isTechnician() || isAdmin();
     }
 
     match /CategoryProgress/{categoryId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && (
-        exists(/databases/$(database)/documents/Developers/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Technicians/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/Admins/$(request.auth.uid))
-      );
+      allow write: if isDeveloper() || isTechnician() || isAdmin();
     }
 
     match /EmailNotifications/{emailId} {

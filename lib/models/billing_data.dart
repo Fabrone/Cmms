@@ -13,6 +13,7 @@ class BillingData {
   final String? approvalNotes;
   final String? approvedBy;
   final DateTime? approvedAt;
+  final bool isAdminDocument; // 🔧 NEW: Added isAdminDocument field
 
   BillingData({
     required this.id,
@@ -27,6 +28,7 @@ class BillingData {
     this.approvalNotes,
     this.approvedBy,
     this.approvedAt,
+    this.isAdminDocument = false, // 🔧 NEW: Default to false
   });
 
   // Helper method to normalize legacy statuses
@@ -56,6 +58,7 @@ class BillingData {
       approvedAt: data['approvedAt'] != null 
           ? (data['approvedAt'] as Timestamp).toDate()
           : null,
+      isAdminDocument: data['isAdminDocument'] ?? false, // 🔧 FIXED: Default to false if not present
     );
   }
 
@@ -77,6 +80,7 @@ class BillingData {
       approvedAt: data['approvedAt'] != null 
           ? (data['approvedAt'] as Timestamp).toDate()
           : null,
+      isAdminDocument: data['isAdminDocument'] ?? false, // 🔧 FIXED: Default to false if not present
     );
   }
 
@@ -93,6 +97,7 @@ class BillingData {
       'approvalNotes': approvalNotes,
       'approvedBy': approvedBy,
       'approvedAt': approvedAt != null ? Timestamp.fromDate(approvedAt!) : null,
+      'isAdminDocument': isAdminDocument, // 🔧 NEW: Include in map
     };
   }
 
@@ -109,6 +114,7 @@ class BillingData {
     String? approvalNotes,
     String? approvedBy,
     DateTime? approvedAt,
+    bool? isAdminDocument, // 🔧 NEW: Include in copyWith
   }) {
     return BillingData(
       id: id ?? this.id,
@@ -123,12 +129,13 @@ class BillingData {
       approvalNotes: approvalNotes ?? this.approvalNotes,
       approvedBy: approvedBy ?? this.approvedBy,
       approvedAt: approvedAt ?? this.approvedAt,
+      isAdminDocument: isAdminDocument ?? this.isAdminDocument, // 🔧 NEW: Include in copyWith
     );
   }
 
   @override
   String toString() {
-    return 'BillingData(id: $id, title: $title, status: $status, approvalStatus: $approvalStatus)';
+    return 'BillingData(id: $id, title: $title, status: $status, approvalStatus: $approvalStatus, isAdminDocument: $isAdminDocument)';
   }
 
   @override
