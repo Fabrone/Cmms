@@ -1,10 +1,16 @@
-rules_version = '2';
-
-// Craft rules based on data in your Firestore database
-// allow write: if firestore.get(
-//    /databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin;
 service firebase.storage {
   match /b/{bucket}/o {
+    
+    match /facilities/{facilityId}/{collection}/{fileName} {
+      allow read, write: if collection in [
+        'survey_pdfs', 'drawings', 'documentations', 'reports', 'price_list',
+        'schedule_maintenance', 'scheduled_tasks', 'preventive_maintenance',
+        'vendors', 'equipment_supplied', 'inventory', 'requests', 'work_orders',
+        'kpis', 'locations', 'maintenance_settings', 'predefined_tasks', 
+        'scheduled_tasks_attachments', 'building_surveys', 'billing_data',
+        'work_requests'
+      ];
+    }
     match /{allPaths=**} {
       allow read, write: if false;
     }

@@ -13,7 +13,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class BillingScreen extends StatefulWidget {
@@ -58,7 +57,6 @@ class _BillingScreenState extends State<BillingScreen> {
     if (user == null) return;
 
     try {
-      // Use exact same pattern as WorkOrderScreen for consistency
       final adminDoc = await FirebaseFirestore.instance.collection('Admins').doc(user.uid).get();
       final developerDoc = await FirebaseFirestore.instance.collection('Developers').doc(user.uid).get();
       final technicianDoc = await FirebaseFirestore.instance.collection('Technicians').doc(user.uid).get();
@@ -77,7 +75,7 @@ class _BillingScreenState extends State<BillingScreen> {
         newOrg = data['organization'] ?? '-';
         username = data['username'] ?? data['name'] ?? data['displayName'];
         isClient = newOrg != 'JV Almacis';
-        isAdminClient = isClient; // Admin client has special privileges
+        isAdminClient = isClient;
         logger.i('User is Admin, org: $newOrg, isClient: $isClient, isAdminClient: $isAdminClient');
       } else if (developerDoc.exists) {
         newRole = 'Technician';
@@ -123,11 +121,175 @@ class _BillingScreenState extends State<BillingScreen> {
     }
   }
 
-  bool get _canUpload => _isJVAlmacisUser;
+  bool get _canUpload => _isJVAlmacisUser || _isAdmin;
+  bool get _isAdmin => _currentRole == 'Admin';
+
+  Future<void> _uploadAdminDocument() async {
+    if (!_isAdmin) {
+      _showSnackBar('Only admins can upload admin documents');
+      return;
+    }
+
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'pptx', 'txt'],
+        withData: kIsWeb,
+      );
+      if (result == null || result.files.isEmpty) return;
+
+      final platformFile = result.files.single;
+      final fileName = platformFile.name;
+      final user = FirebaseAuth.instance.currentUser;
+      
+      if (user == null) {
+        _showSnackBar('Please sign in to upload documents');
+        return;
+      }
+
+      if (!mounted) return;
+      final bool? confirmUpload = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Confirm Admin Document Upload', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Upload admin document: $fileName?', style: GoogleFonts.poppins()),
+              const SizedBox(height: 8),
+              Text(
+                'This will replace any existing admin document.',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  color: Colors.orange[700],
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel', style: GoogleFonts.poppins()),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green[800]),
+              child: Text('Upload', style: GoogleFonts.poppins(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmUpload != true) return;
+
+      if (!mounted) return;
+      _showUploadDialog(fileName);
+
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('facilities/${widget.facilityId}/billing_data/${DateTime.now().millisecondsSinceEpoch}_$fileName');
+
+      late UploadTask uploadTask;
+      
+      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        uploadTask = storageRef.putData(platformFile.bytes!);
+      } else {
+        uploadTask = storageRef.putFile(File(platformFile.path!));
+      }
+
+      uploadTask.snapshotEvents.listen((snapshot) {
+        if (mounted) {
+          setState(() {
+            _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
+          });
+        }
+      });
+
+      await uploadTask;
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      final existingAdminDocs = await FirebaseFirestore.instance
+          .collection('BillingData')
+          .where('facilityId', isEqualTo: widget.facilityId)
+          .where('isAdminDocument', isEqualTo: true)
+          .get();
+      
+      for (var doc in existingAdminDocs.docs) {
+        await doc.reference.delete();
+      }
+
+      await FirebaseFirestore.instance.collection('BillingData').add({
+        'userId': user.uid,
+        'title': fileName,
+        'fileName': fileName,
+        'downloadUrl': downloadUrl,
+        'uploadedAt': FieldValue.serverTimestamp(),
+        'facilityId': widget.facilityId,
+        'status': 'pending',
+        'approvalStatus': 'pending',
+        'isAdminDocument': true,
+        'platform': kIsWeb ? 'web' : Platform.operatingSystem,
+      });
+
+      if (mounted) {
+        Navigator.pop(context);
+        _showSnackBar('Admin document uploaded successfully');
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        _showSnackBar('Error uploading admin document: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _uploadProgress = null);
+      }
+    }
+  }
+
+  Future<void> _deleteAdminDocument(String docId, String fileName) async {
+    if (!_isAdmin) {
+      _showSnackBar('Only admins can delete admin documents');
+      return;
+    }
+
+    if (!mounted) return;
+    final bool? confirmDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Admin Document', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text(
+          'Are you sure you want to delete "$fileName"? This action cannot be undone.',
+          style: GoogleFonts.poppins(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: GoogleFonts.poppins()),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red[700]),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmDelete != true) return;
+
+    try {
+      await FirebaseFirestore.instance.collection('BillingData').doc(docId).delete();
+      if (mounted) _showSnackBar('Admin document deleted successfully');
+    } catch (e) {
+      if (mounted) _showSnackBar('Error deleting admin document: $e');
+    }
+  }
 
   Future<void> _uploadDocument() async {
     if (!_canUpload) {
-      if (mounted) _showSnackBar('Only JV Almacis users can upload billing documents');
+      if (mounted) _showSnackBar('You do not have permission to upload billing documents');
       return;
     }
 
@@ -192,7 +354,7 @@ class _BillingScreenState extends State<BillingScreen> {
             ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blueGrey[800],
+                backgroundColor: Colors.green[800],
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
               child: Text('Upload', style: GoogleFonts.poppins(color: Colors.white)),
@@ -207,44 +369,7 @@ class _BillingScreenState extends State<BillingScreen> {
       }
 
       if (!mounted) return;
-
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => PopScope(
-          canPop: false,
-          child: AlertDialog(
-            title: Text('Uploading: $fileName', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LinearProgressIndicator(
-                  value: _uploadProgress,
-                  backgroundColor: Colors.grey[300],
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.blueGrey),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _uploadProgress != null
-                      ? '${(_uploadProgress! * 100).toStringAsFixed(0)}%'
-                      : 'Starting upload...',
-                  style: GoogleFonts.poppins(),
-                ),
-                if (kIsWeb) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Web Upload',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: Colors.blue[600],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      );
+      _showUploadDialog(fileName);
 
       final storageRef = FirebaseStorage.instance
           .ref()
@@ -307,6 +432,7 @@ class _BillingScreenState extends State<BillingScreen> {
         'facilityId': widget.facilityId,
         'status': 'pending',
         'approvalStatus': 'pending',
+        'isAdminDocument': false,
         'platform': kIsWeb ? 'web' : Platform.operatingSystem,
       });
 
@@ -332,9 +458,50 @@ class _BillingScreenState extends State<BillingScreen> {
     }
   }
 
-  Future<void> _viewDocument(String url, String fileName, String docId) async {
+  void _showUploadDialog(String fileName) {
     if (!mounted) return;
-    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: Text('Uploading: $fileName', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              LinearProgressIndicator(
+                value: _uploadProgress,
+                backgroundColor: Colors.grey[300],
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _uploadProgress != null
+                    ? '${(_uploadProgress! * 100).toStringAsFixed(0)}%'
+                    : 'Starting upload...',
+                style: GoogleFonts.poppins(),
+              ),
+              if (kIsWeb) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Web Upload',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: Colors.blue[600],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _viewDocument(String url, String fileName, String docId, {bool isAdminDocument = false}) async {
+    if (!mounted) return;
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -350,6 +517,10 @@ class _BillingScreenState extends State<BillingScreen> {
       ),
     );
 
+    final isPdf = fileName.toLowerCase().endsWith('.pdf');
+    final isDocx = fileName.toLowerCase().endsWith('.doc') || fileName.toLowerCase().endsWith('.docx');
+    final isExcel = fileName.toLowerCase().endsWith('.xls') || fileName.toLowerCase().endsWith('.xlsx');
+
     try {
       if (mounted) {
         setState(() {
@@ -358,55 +529,111 @@ class _BillingScreenState extends State<BillingScreen> {
         });
       }
 
-      logger.i('Viewing document: $fileName, url: $url');
-      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-        if (mounted) Navigator.pop(context);
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        } else {
-          throw 'Could not open billing document in browser';
-        }
-      } else if (Platform.isAndroid || Platform.isIOS) {
-        if (fileName.toLowerCase().endsWith('.pdf')) {
-          final tempDir = await getTemporaryDirectory();
-          final filePath = '${tempDir.path}/$fileName';
-          await Dio().download(url, filePath);
-          final file = File(filePath);
-          if (await file.exists()) {
-            if (mounted) {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => PDFViewerScreen(
-                    filePath: filePath,
-                    name: fileName,
-                    facilityId: widget.facilityId,
+      logger.i('Viewing document: $fileName, url: $url, isAdmin: $isAdminDocument');
+
+      if (isAdminDocument) {
+        if (Platform.isAndroid || Platform.isIOS) {
+          if (isPdf) {
+            final tempDir = await getTemporaryDirectory();
+            final filePath = '${tempDir.path}/$fileName';
+            await Dio().download(url, filePath);
+            final file = File(filePath);
+            if (await file.exists()) {
+              if (mounted) {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => PDFViewerScreen(
+                      filePath: filePath,
+                      name: fileName,
+                      facilityId: widget.facilityId,
+                    ),
                   ),
-                ),
-              );
+                );
+              }
+            } else {
+              throw 'Failed to download PDF for viewing';
+            }
+          } else if (isDocx || isExcel) {
+            final uri = Uri.parse(url);
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+              if (mounted) Navigator.pop(context);
+            } else {
+              throw 'No app available to view $fileName';
             }
           } else {
-            throw 'Failed to download PDF';
+            throw 'Viewing is only supported for PDF, DOCX, and Excel files on mobile';
           }
-        } else {
+        } else if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+          final uri = Uri.parse(url);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.inAppWebView);
+            if (mounted) Navigator.pop(context);
+          } else {
+            throw 'Could not open $fileName in browser';
+          }
+        }
+      } else {
+        if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
           if (mounted) Navigator.pop(context);
-          throw 'Only PDF viewing supported on mobile';
+          final uri = Uri.parse(url);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          } else {
+            throw 'Could not open $fileName in browser';
+          }
+        } else if (Platform.isAndroid || Platform.isIOS) {
+          if (isPdf) {
+            final tempDir = await getTemporaryDirectory();
+            final filePath = '${tempDir.path}/$fileName';
+            await Dio().download(url, filePath);
+            final file = File(filePath);
+            if (await file.exists()) {
+              if (mounted) {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => PDFViewerScreen(
+                      filePath: filePath,
+                      name: fileName,
+                      facilityId: widget.facilityId,
+                    ),
+                  ),
+                );
+              }
+            } else {
+              throw 'Failed to download PDF for viewing';
+            }
+          } else {
+            if (mounted) Navigator.pop(context);
+            final uri = Uri.parse(url);
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            } else {
+              throw 'Could not open $fileName. No app available to view this file type.';
+            }
+          }
         }
       }
     } catch (e, stackTrace) {
-      logger.e('Error viewing billing document: $e', stackTrace: stackTrace);
+      logger.e('Error viewing document: $e', stackTrace: stackTrace);
       if (mounted) {
         Navigator.pop(context);
-        _showSnackBar('Error viewing billing document: $e');
+        _showSnackBar(
+          isAdminDocument && !isPdf && !isDocx && !isExcel
+              ? 'Viewing is only supported for PDF, DOCX, and Excel files'
+              : 'Error viewing document: $e',
+        );
       }
     }
   }
 
-  Future<void> _downloadDocument(String url, String fileName) async {
+  Future<void> _downloadDocument(String url, String fileName, {bool isAdminDocument = false}) async {
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -423,65 +650,56 @@ class _BillingScreenState extends State<BillingScreen> {
     );
 
     try {
-      logger.i('Downloading document: $fileName, url: $url');
-      if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-        if (mounted) Navigator.pop(context);
+      logger.i('Downloading document: $fileName, url: $url, isAdmin: $isAdminDocument');
+      
+      if (kIsWeb) {
         final uri = Uri.parse(url);
         if (await canLaunchUrl(uri)) {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
-        } else {
-          throw 'Could not download billing document';
-        }
-      } else if (Platform.isAndroid || Platform.isIOS) {
-        bool permissionGranted = await _requestStoragePermission();
-        if (!permissionGranted) {
           if (mounted) {
             Navigator.pop(context);
-            _showSnackBar('Storage permission denied');
+            _showSnackBar('Document downloaded to browser downloads');
           }
-          return;
+        } else {
+          throw 'Could not download $fileName in browser';
         }
-
-        final downloadsDir = await getExternalStorageDirectory();
-        final filePath = '${downloadsDir!.path}/$fileName';
+      } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        final tempDir = await getTemporaryDirectory();
+        final filePath = '${tempDir.path}/$fileName';
         await Dio().download(url, filePath);
-
         final file = File(filePath);
         if (await file.exists()) {
           if (mounted) {
             Navigator.pop(context);
-            _showSnackBar('Billing document downloaded to $filePath');
+            _showSnackBar('Document downloaded to $filePath');
           }
-          logger.i('Downloaded billing document: $fileName to $filePath');
         } else {
-          throw 'Failed to download billing document';
+          throw 'Failed to download document';
+        }
+      } else if (Platform.isAndroid || Platform.isIOS) {
+        final downloadsDir = await getDownloadsDirectory();
+        if (downloadsDir == null) {
+          throw 'Could not access downloads directory';
+        }
+        final filePath = '${downloadsDir.path}/$fileName';
+        await Dio().download(url, filePath);
+        final file = File(filePath);
+        if (await file.exists()) {
+          if (mounted) {
+            Navigator.pop(context);
+            _showSnackBar('Document downloaded to $filePath');
+          }
+        } else {
+          throw 'Failed to download document';
         }
       }
     } catch (e, stackTrace) {
-      logger.e('Error downloading billing document: $e', stackTrace: stackTrace);
+      logger.e('Error downloading document: $e', stackTrace: stackTrace);
       if (mounted) {
         Navigator.pop(context);
-        _showSnackBar('Error downloading billing document: $e');
+        _showSnackBar('Error downloading document: $e');
       }
     }
-  }
-
-  Future<bool> _requestStoragePermission() async {
-    if (Platform.isAndroid) {
-      var status = await Permission.storage.status;
-      if (!status.isGranted) {
-        status = await Permission.storage.request();
-      }
-      if (!status.isGranted) {
-        status = await Permission.manageExternalStorage.status;
-        if (!status.isGranted) {
-          status = await Permission.manageExternalStorage.request();
-        }
-      }
-      logger.i('Storage permission status: $status');
-      return status.isGranted;
-    }
-    return true;
   }
 
   Future<void> _updateBillingStatus(String docId, String newStatus) async {
@@ -536,6 +754,7 @@ class _BillingScreenState extends State<BillingScreen> {
       return;
     }
 
+    if (!mounted) return;
     final bool? confirmDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -612,6 +831,42 @@ class _BillingScreenState extends State<BillingScreen> {
     return billing.approvalStatus;
   }
 
+  IconData _getFileIcon(String fileName) {
+    final extension = fileName.toLowerCase().split('.').last;
+    switch (extension) {
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      case 'doc':
+      case 'docx':
+        return Icons.description;
+      case 'xls':
+      case 'xlsx':
+        return Icons.table_chart;
+      case 'pptx':
+        return Icons.slideshow;
+      default:
+        return Icons.insert_drive_file;
+    }
+  }
+
+  Color _getFileIconColor(String fileName) {
+    final extension = fileName.toLowerCase().split('.').last;
+    switch (extension) {
+      case 'pdf':
+        return Colors.red[600]!;
+      case 'doc':
+      case 'docx':
+        return Colors.blue[600]!;
+      case 'xls':
+      case 'xlsx':
+        return Colors.green[600]!;
+      case 'pptx':
+        return Colors.orange[600]!;
+      default:
+        return Colors.grey[600]!;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ResponsiveScreenWrapper(
@@ -622,7 +877,7 @@ class _BillingScreenState extends State<BillingScreen> {
       floatingActionButton: _canUpload
           ? FloatingActionButton.extended(
               onPressed: () => setState(() => _showForm = !_showForm),
-              backgroundColor: Colors.blueGrey[800],
+              backgroundColor: Colors.green[800],
               icon: Icon(_showForm ? Icons.close : Icons.upload_file, color: Colors.white),
               label: Text(
                 _showForm ? 'Cancel' : 'Upload Billing Document',
@@ -648,6 +903,8 @@ class _BillingScreenState extends State<BillingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildAdminDocumentSection(padding, fontSizeTitle, fontSizeSubtitle),
+          
           if (_canUpload && _showForm) _buildUploadForm(padding, fontSizeTitle, fontSizeSubtitle),
           const SizedBox(height: 24),
           Row(
@@ -685,6 +942,7 @@ class _BillingScreenState extends State<BillingScreen> {
             stream: FirebaseFirestore.instance
                 .collection('BillingData')
                 .where('facilityId', isEqualTo: widget.facilityId)
+                .where('isAdminDocument', isEqualTo: false)
                 .orderBy('uploadedAt', descending: true)
                 .snapshots(),
             builder: (context, snapshot) {
@@ -739,6 +997,191 @@ class _BillingScreenState extends State<BillingScreen> {
               logger.i('Found ${docs.length} billing documents');
               return _buildBillingTable(docs, isMobile, fontSizeSubtitle);
             },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdminDocumentSection(double padding, double fontSizeTitle, double fontSizeSubtitle) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('BillingData')
+          .where('facilityId', isEqualTo: widget.facilityId)
+          .where('isAdminDocument', isEqualTo: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError || snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox.shrink();
+        }
+        
+        final docs = snapshot.data?.docs ?? [];
+        final hasAdminDoc = docs.isNotEmpty;
+        
+        if (!hasAdminDoc && !_isAdmin) {
+          return const SizedBox.shrink();
+        }
+        
+        return Column(
+          children: [
+            Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              color: Colors.blue[50],
+              child: Padding(
+                padding: EdgeInsets.all(padding),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (hasAdminDoc) 
+                      _buildExistingAdminDocument(docs.first, fontSizeSubtitle)
+                    else if (_isAdmin)
+                      _buildUploadAdminDocumentButton(),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildExistingAdminDocument(QueryDocumentSnapshot doc, double fontSizeSubtitle) {
+    final billing = BillingData.fromSnapshot(doc);
+    
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _getFileIconColor(billing.fileName).withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            _getFileIcon(billing.fileName),
+            color: _getFileIconColor(billing.fileName),
+            size: 32,
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                billing.fileName,
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600,
+                  fontSize: fontSizeSubtitle,
+                  color: Colors.blueGrey[900],
+                ),
+              ),
+              if (billing.uploadedAt != null)
+                Text(
+                  'Uploaded: ${DateFormat('MMM dd, yyyy').format(billing.uploadedAt!)}',
+                  style: GoogleFonts.poppins(
+                    fontSize: fontSizeSubtitle - 2,
+                    color: Colors.blueGrey[600],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        PopupMenuButton<String>(
+          onSelected: (value) {
+            switch (value) {
+              case 'view':
+                _viewDocument(billing.downloadUrl, billing.fileName, billing.id, isAdminDocument: false); 
+                break;
+              case 'download':
+                _downloadDocument(billing.downloadUrl, billing.fileName, isAdminDocument: true); 
+                break;
+              case 'update':
+                if (_isAdmin) _uploadAdminDocument();
+                break;
+              case 'delete':
+                if (_isAdmin) _deleteAdminDocument(billing.id, billing.fileName);
+                break;
+            }
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'view',
+              child: Row(
+                children: [
+                  Icon(Icons.visibility, color: Colors.blue[700], size: 20),
+                  const SizedBox(width: 8),
+                  Text('View', style: GoogleFonts.poppins()),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'download',
+              child: Row(
+                children: [
+                  Icon(Icons.download, color: Colors.green[700], size: 20),
+                  const SizedBox(width: 8),
+                  Text('Download', style: GoogleFonts.poppins()),
+                ],
+              ),
+            ),
+            if (_isAdmin) ...[
+              PopupMenuItem(
+                value: 'update',
+                child: Row(
+                  children: [
+                    Icon(Icons.update, color: Colors.orange[700], size: 20),
+                    const SizedBox(width: 8),
+                    Text('Update', style: GoogleFonts.poppins()),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete, color: Colors.red[700], size: 20),
+                    const SizedBox(width: 8),
+                    Text('Delete', style: GoogleFonts.poppins()),
+                  ],
+                ),
+              ),
+            ],
+          ],
+          icon: Icon(Icons.more_vert, color: Colors.blueGrey[600]),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUploadAdminDocumentButton() {
+    return Center(
+      child: Column(
+        children: [
+          Icon(
+            Icons.cloud_upload,
+            size: 48,
+            color: Colors.blueGrey[400],
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _uploadAdminDocument,
+            icon: const Icon(Icons.upload_file, color: Colors.white),
+            label: Text(
+              'Upload Admin Billing Doc',
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green[800],
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              elevation: 2,
+            ),
           ),
         ],
       ),
@@ -847,7 +1290,6 @@ class _BillingScreenState extends State<BillingScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Document header
                 Row(
                   children: [
                     Icon(
@@ -881,8 +1323,6 @@ class _BillingScreenState extends State<BillingScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                
-                // Status section - organized vertically for mobile
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -893,7 +1333,6 @@ class _BillingScreenState extends State<BillingScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Approval Status
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -913,8 +1352,6 @@ class _BillingScreenState extends State<BillingScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      
-                      // Payment Status
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -934,8 +1371,6 @@ class _BillingScreenState extends State<BillingScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      
-                      // Actions
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -950,8 +1385,6 @@ class _BillingScreenState extends State<BillingScreen> {
                           _buildActionButtons(billing),
                         ],
                       ),
-                      
-                      // Approval Notes if available
                       if (billing.approvalNotes != null && billing.approvalNotes!.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         Container(
@@ -1003,7 +1436,6 @@ class _BillingScreenState extends State<BillingScreen> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // Table Header
             Container(
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
               decoration: BoxDecoration(
@@ -1065,7 +1497,6 @@ class _BillingScreenState extends State<BillingScreen> {
                 ],
               ),
             ),
-            // Table Rows
             ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -1087,7 +1518,6 @@ class _BillingScreenState extends State<BillingScreen> {
                   ),
                   child: Row(
                     children: [
-                      // Document Column
                       Expanded(
                         flex: 4,
                         child: Row(
@@ -1123,7 +1553,6 @@ class _BillingScreenState extends State<BillingScreen> {
                           ],
                         ),
                       ),
-                      // Approval Status Column
                       Expanded(
                         flex: 2,
                         child: Center(
@@ -1134,7 +1563,6 @@ class _BillingScreenState extends State<BillingScreen> {
                           ),
                         ),
                       ),
-                      // Payment Status Column
                       Expanded(
                         flex: 2,
                         child: Center(
@@ -1145,7 +1573,6 @@ class _BillingScreenState extends State<BillingScreen> {
                           ),
                         ),
                       ),
-                      // Actions Column
                       Expanded(
                         flex: 1,
                         child: Center(
@@ -1174,7 +1601,7 @@ class _BillingScreenState extends State<BillingScreen> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
+          borderSide: BorderSide(color: Colors.green[600]!, width: 2),
         ),
         filled: true,
         fillColor: Colors.grey[100],
@@ -1195,7 +1622,7 @@ class _BillingScreenState extends State<BillingScreen> {
         style: GoogleFonts.poppins(color: Colors.white, fontSize: fontSize),
       ),
       style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.blueGrey[800],
+        backgroundColor: Colors.green[800],
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         elevation: 4,
@@ -1225,7 +1652,6 @@ class _BillingScreenState extends State<BillingScreen> {
   Widget _buildActionButtons(BillingData billing) {
     List<PopupMenuEntry<String>> menuItems = [];
 
-    // View and Download are available to all users
     menuItems.addAll([
       PopupMenuItem(
         value: 'view',
@@ -1255,16 +1681,13 @@ class _BillingScreenState extends State<BillingScreen> {
       ),
     ]);
 
-    // Client Admin specific actions (approval status management)
     if (_isAdminClient) {
       final canApprove = _hasViewedDocument && _currentViewingDocId == billing.id;
       final currentApprovalStatus = _getNormalizedApprovalStatus(billing).toLowerCase();
 
       logger.i('Building action buttons for client admin: canApprove=$canApprove, currentStatus=$currentApprovalStatus, hasViewed=$_hasViewedDocument, currentViewingId=$_currentViewingDocId, billingId=${billing.id}');
 
-      // Dynamic button based on current status
       if (currentApprovalStatus == 'approved') {
-        // If approved, show Review option
         menuItems.add(
           PopupMenuItem(
             value: 'review',
@@ -1291,7 +1714,6 @@ class _BillingScreenState extends State<BillingScreen> {
           ),
         );
       } else {
-        // If not approved, show Approve option
         menuItems.add(
           PopupMenuItem(
             value: 'approve',
@@ -1320,13 +1742,10 @@ class _BillingScreenState extends State<BillingScreen> {
       }
     }
 
-    // JV Almacis Admin specific actions (payment status management)
     if (_isJVAlmacisUser) {
       final currentPaymentStatus = billing.status.toLowerCase();
 
-      // Dynamic button based on current status
       if (currentPaymentStatus == 'paid') {
-        // If paid, show Pending option
         menuItems.add(
           PopupMenuItem(
             value: 'mark_pending',
@@ -1343,7 +1762,6 @@ class _BillingScreenState extends State<BillingScreen> {
           ),
         );
       } else {
-        // If pending, show Paid option
         menuItems.add(
           PopupMenuItem(
             value: 'mark_paid',
@@ -1361,7 +1779,6 @@ class _BillingScreenState extends State<BillingScreen> {
         );
       }
 
-      // Delete option for JV Almacis admins
       menuItems.add(
         PopupMenuItem(
           value: 'delete',
@@ -1386,7 +1803,7 @@ class _BillingScreenState extends State<BillingScreen> {
             _viewDocument(billing.downloadUrl, billing.fileName, billing.id);
             break;
           case 'download':
-            _downloadDocument(billing.downloadUrl, billing.fileName);
+            _downloadDocument(billing.downloadUrl, billing.fileName, isAdminDocument: false);
             break;
           case 'approve':
             _updateApprovalStatus(billing.id, 'approved', null);
@@ -1427,7 +1844,7 @@ class _BillingScreenState extends State<BillingScreen> {
             labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Colors.blueGrey, width: 2),
+              borderSide: BorderSide(color: Colors.green[600]!, width: 2),
             ),
           ),
           style: GoogleFonts.poppins(),
@@ -1441,7 +1858,7 @@ class _BillingScreenState extends State<BillingScreen> {
           ElevatedButton(
             onPressed: () {
               _updateApprovalStatus(docId, 'review', notesController.text.trim());
-              Navigator.pop(context);
+              if (mounted) Navigator.pop(context);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.orange[700],
