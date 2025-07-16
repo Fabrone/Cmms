@@ -780,7 +780,7 @@ class _ResponsiveScreenWrapperState extends State<ResponsiveScreenWrapper> {
       'Work Orders': () => WorkOrderScreen(facilityId: widget.facilityId),
       'Price Lists': () => PriceListScreen(facilityId: widget.facilityId),
       'Billing': () =>
-          BillingScreen(facilityId: widget.facilityId, userRole: _currentRole),
+          BillingScreen(facilityId: widget.facilityId),
       'Equipment Supplied': () =>
           EquipmentSuppliedScreen(facilityId: widget.facilityId),
       'Inventory and Parts': () =>

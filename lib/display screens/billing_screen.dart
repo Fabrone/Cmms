@@ -18,7 +18,7 @@ import 'package:url_launcher/url_launcher.dart';
 class BillingScreen extends StatefulWidget {
   final String facilityId;
 
-  const BillingScreen({super.key, required this.facilityId, required String userRole});
+  const BillingScreen({super.key, required this.facilityId});
 
   @override
   State<BillingScreen> createState() => _BillingScreenState();
@@ -32,11 +32,10 @@ class _BillingScreenState extends State<BillingScreen> {
   bool _showForm = false;
   bool _hasViewedDocument = false;
   String? _currentViewingDocId;
-  
-  // User role information - using same pattern as work orders
+
+  // User role information
   String _currentRole = 'User';
   String _organization = '-';
-  bool _isJVAlmacisUser = false;
   bool _isAdminClient = false;
 
   @override
@@ -66,7 +65,6 @@ class _BillingScreenState extends State<BillingScreen> {
       String newOrg = '-';
       String? username;
       bool isClient = false;
-      bool isJVAlmacisUser = false;
       bool isAdminClient = false;
 
       if (adminDoc.exists) {
@@ -82,7 +80,6 @@ class _BillingScreenState extends State<BillingScreen> {
         newOrg = 'JV Almacis';
         final data = developerDoc.data()!;
         username = data['username'] ?? data['name'] ?? data['displayName'];
-        isJVAlmacisUser = true;
         logger.i('User is Developer (JV Almacis), org: $newOrg');
       } else if (technicianDoc.exists) {
         newRole = 'Technician';
@@ -90,8 +87,7 @@ class _BillingScreenState extends State<BillingScreen> {
         newOrg = data['organization'] ?? '-';
         username = data['username'] ?? data['name'] ?? data['displayName'];
         isClient = newOrg != 'JV Almacis';
-        isJVAlmacisUser = newOrg == 'JV Almacis';
-        logger.i('User is Technician, org: $newOrg, isClient: $isClient, isJVAlmacis: $isJVAlmacisUser');
+        logger.i('User is Technician, org: $newOrg, isClient: $isClient');
       } else if (userDoc.exists) {
         final userData = userDoc.data()!;
         if (userData['role'] == 'Technician') {
@@ -103,7 +99,6 @@ class _BillingScreenState extends State<BillingScreen> {
         }
         username = userData['username'] ?? userData['name'] ?? userData['displayName'];
         isClient = newOrg != 'JV Almacis';
-        isJVAlmacisUser = newOrg == 'JV Almacis';
         logger.i('User from Users collection, role: $newRole, org: $newOrg, isClient: $isClient');
       }
 
@@ -111,22 +106,21 @@ class _BillingScreenState extends State<BillingScreen> {
         setState(() {
           _currentRole = newRole;
           _organization = newOrg;
-          _isJVAlmacisUser = isJVAlmacisUser;
           _isAdminClient = isAdminClient;
         });
-        logger.i('Updated user info for Billing: isJVAlmacis=$isJVAlmacisUser, isAdminClient=$isAdminClient, org=$newOrg, username=$username');
+        logger.i('Updated user info for Billing: isAdminClient=$isAdminClient, org=$newOrg, username=$username');
       }
     } catch (e) {
       logger.e('Error getting user info: $e');
     }
   }
 
-  bool get _canUpload => _isJVAlmacisUser || _isAdmin;
+  bool get _canUpload => _isAdmin && _organization == 'JV Almacis';
   bool get _isAdmin => _currentRole == 'Admin';
 
   Future<void> _uploadAdminDocument() async {
-    if (!_isAdmin) {
-      _showSnackBar('Only admins can upload admin documents');
+    if (!(_isAdmin && _organization == 'JV Almacis')) {
+      _showSnackBar('Only JV Almacis admins can upload admin documents');
       return;
     }
 
@@ -141,7 +135,7 @@ class _BillingScreenState extends State<BillingScreen> {
       final platformFile = result.files.single;
       final fileName = platformFile.name;
       final user = FirebaseAuth.instance.currentUser;
-      
+
       if (user == null) {
         _showSnackBar('Please sign in to upload documents');
         return;
@@ -191,7 +185,7 @@ class _BillingScreenState extends State<BillingScreen> {
           .child('facilities/${widget.facilityId}/billing_data/${DateTime.now().millisecondsSinceEpoch}_$fileName');
 
       late UploadTask uploadTask;
-      
+
       if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
         uploadTask = storageRef.putData(platformFile.bytes!);
       } else {
@@ -214,7 +208,7 @@ class _BillingScreenState extends State<BillingScreen> {
           .where('facilityId', isEqualTo: widget.facilityId)
           .where('isAdminDocument', isEqualTo: true)
           .get();
-      
+
       for (var doc in existingAdminDocs.docs) {
         await doc.reference.delete();
       }
@@ -249,8 +243,8 @@ class _BillingScreenState extends State<BillingScreen> {
   }
 
   Future<void> _deleteAdminDocument(String docId, String fileName) async {
-    if (!_isAdmin) {
-      _showSnackBar('Only admins can delete admin documents');
+    if (!(_isAdmin && _organization == 'JV Almacis')) {
+      _showSnackBar('Only JV Almacis admins can delete admin documents');
       return;
     }
 
@@ -272,7 +266,7 @@ class _BillingScreenState extends State<BillingScreen> {
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red[700]),
             child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white)),
-          ),
+          )
         ],
       ),
     );
@@ -309,7 +303,7 @@ class _BillingScreenState extends State<BillingScreen> {
       final platformFile = result.files.single;
       final fileName = platformFile.name;
       final user = FirebaseAuth.instance.currentUser;
-      
+
       if (user == null) {
         logger.w('No authenticated user for upload');
         if (mounted) _showSnackBar('Please sign in to upload billing documents');
@@ -326,7 +320,7 @@ class _BillingScreenState extends State<BillingScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (kIsWeb) 
+              if (kIsWeb)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
@@ -376,12 +370,12 @@ class _BillingScreenState extends State<BillingScreen> {
           .child('facilities/${widget.facilityId}/billing_data/${DateTime.now().millisecondsSinceEpoch}_$fileName');
 
       late UploadTask uploadTask;
-      
+
       if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
         if (platformFile.bytes == null) {
           throw 'File bytes not available for web/desktop upload';
         }
-        
+
         final metadata = SettableMetadata(
           contentType: 'application/pdf',
           customMetadata: {
@@ -390,13 +384,13 @@ class _BillingScreenState extends State<BillingScreen> {
             'platform': kIsWeb ? 'web' : Platform.operatingSystem,
           },
         );
-        
+
         uploadTask = storageRef.putData(platformFile.bytes!, metadata);
       } else {
         if (platformFile.path == null) {
           throw 'File path not available for mobile upload';
         }
-        
+
         final file = File(platformFile.path!);
         final metadata = SettableMetadata(
           contentType: 'application/pdf',
@@ -406,7 +400,7 @@ class _BillingScreenState extends State<BillingScreen> {
             'platform': Platform.operatingSystem,
           },
         );
-        
+
         uploadTask = storageRef.putFile(file, metadata);
       }
 
@@ -651,7 +645,7 @@ class _BillingScreenState extends State<BillingScreen> {
 
     try {
       logger.i('Downloading document: $fileName, url: $url, isAdmin: $isAdminDocument');
-      
+
       if (kIsWeb) {
         final uri = Uri.parse(url);
         if (await canLaunchUrl(uri)) {
@@ -703,8 +697,8 @@ class _BillingScreenState extends State<BillingScreen> {
   }
 
   Future<void> _updateBillingStatus(String docId, String newStatus) async {
-    if (!_isJVAlmacisUser) {
-      if (mounted) _showSnackBar('Only JV Almacis users can update payment status');
+    if (!_isAdmin || _organization != 'JV Almacis') {
+      if (mounted) _showSnackBar('Only JV Almacis admins can update payment status');
       return;
     }
 
@@ -749,8 +743,8 @@ class _BillingScreenState extends State<BillingScreen> {
   }
 
   Future<void> _deleteDocument(String docId, String fileName) async {
-    if (!_isJVAlmacisUser) {
-      if (mounted) _showSnackBar('Only JV Almacis users can delete documents');
+    if (!_isAdmin || _organization != 'JV Almacis') {
+      if (mounted) _showSnackBar('Only JV Almacis admins can delete documents');
       return;
     }
 
@@ -904,7 +898,6 @@ class _BillingScreenState extends State<BillingScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildAdminDocumentSection(padding, fontSizeTitle, fontSizeSubtitle),
-          
           if (_canUpload && _showForm) _buildUploadForm(padding, fontSizeTitle, fontSizeSubtitle),
           const SizedBox(height: 24),
           Row(
@@ -947,7 +940,7 @@ class _BillingScreenState extends State<BillingScreen> {
                 .snapshots(),
             builder: (context, snapshot) {
               if (!mounted) return const SizedBox.shrink();
-              
+
               logger.i('StreamBuilder snapshot: connectionState=${snapshot.connectionState}, hasError=${snapshot.hasError}, docCount=${snapshot.data?.docs.length ?? 0}');
               if (snapshot.hasError) {
                 logger.e('StreamBuilder error: ${snapshot.error}');
@@ -1014,14 +1007,14 @@ class _BillingScreenState extends State<BillingScreen> {
         if (snapshot.hasError || snapshot.connectionState == ConnectionState.waiting) {
           return const SizedBox.shrink();
         }
-        
+
         final docs = snapshot.data?.docs ?? [];
         final hasAdminDoc = docs.isNotEmpty;
-        
-        if (!hasAdminDoc && !_isAdmin) {
+
+        if (!hasAdminDoc && !(_isAdmin && _organization == 'JV Almacis')) {
           return const SizedBox.shrink();
         }
-        
+
         return Column(
           children: [
             Card(
@@ -1033,9 +1026,9 @@ class _BillingScreenState extends State<BillingScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (hasAdminDoc) 
+                    if (hasAdminDoc)
                       _buildExistingAdminDocument(docs.first, fontSizeSubtitle)
-                    else if (_isAdmin)
+                    else if (_isAdmin && _organization == 'JV Almacis')
                       _buildUploadAdminDocumentButton(),
                   ],
                 ),
@@ -1050,7 +1043,7 @@ class _BillingScreenState extends State<BillingScreen> {
 
   Widget _buildExistingAdminDocument(QueryDocumentSnapshot doc, double fontSizeSubtitle) {
     final billing = BillingData.fromSnapshot(doc);
-    
+
     return Row(
       children: [
         Container(
@@ -1093,16 +1086,16 @@ class _BillingScreenState extends State<BillingScreen> {
           onSelected: (value) {
             switch (value) {
               case 'view':
-                _viewDocument(billing.downloadUrl, billing.fileName, billing.id, isAdminDocument: false); 
+                _viewDocument(billing.downloadUrl, billing.fileName, billing.id, isAdminDocument: true);
                 break;
               case 'download':
-                _downloadDocument(billing.downloadUrl, billing.fileName, isAdminDocument: true); 
+                _downloadDocument(billing.downloadUrl, billing.fileName, isAdminDocument: true);
                 break;
               case 'update':
-                if (_isAdmin) _uploadAdminDocument();
+                _uploadAdminDocument();
                 break;
               case 'delete':
-                if (_isAdmin) _deleteAdminDocument(billing.id, billing.fileName);
+                _deleteAdminDocument(billing.id, billing.fileName);
                 break;
             }
           },
@@ -1127,7 +1120,7 @@ class _BillingScreenState extends State<BillingScreen> {
                 ],
               ),
             ),
-            if (_isAdmin) ...[
+            if (_isAdmin && _organization == 'JV Almacis') ...[
               PopupMenuItem(
                 value: 'update',
                 child: Row(
@@ -1266,7 +1259,7 @@ class _BillingScreenState extends State<BillingScreen> {
 
   Widget _buildBillingTable(List<QueryDocumentSnapshot> docs, bool isMobile, double fontSize) {
     final billingDocs = docs.map((doc) => BillingData.fromSnapshot(doc)).toList();
-    
+
     if (isMobile) {
       return _buildMobileBillingList(billingDocs, fontSize);
     } else {
@@ -1504,7 +1497,7 @@ class _BillingScreenState extends State<BillingScreen> {
               itemBuilder: (context, index) {
                 final billing = billingDocs[index];
                 final isEven = index % 2 == 0;
-                
+
                 return Container(
                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                   decoration: BoxDecoration(
@@ -1681,7 +1674,7 @@ class _BillingScreenState extends State<BillingScreen> {
       ),
     ]);
 
-    if (_isAdminClient) {
+    if (_isAdminClient && !(_isAdmin && _organization == 'JV Almacis')) {
       final canApprove = _hasViewedDocument && _currentViewingDocId == billing.id;
       final currentApprovalStatus = _getNormalizedApprovalStatus(billing).toLowerCase();
 
@@ -1742,7 +1735,7 @@ class _BillingScreenState extends State<BillingScreen> {
       }
     }
 
-    if (_isJVAlmacisUser) {
+    if (_isAdmin && _organization == 'JV Almacis') {
       final currentPaymentStatus = billing.status.toLowerCase();
 
       if (currentPaymentStatus == 'paid') {
