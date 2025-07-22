@@ -1,3 +1,4 @@
+import 'package:cmms/notifications/services/notification_service.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -6,7 +7,7 @@ import 'package:cmms/screens/profile_screen.dart';
 import 'package:cmms/screens/about_screen.dart';
 import 'package:cmms/screens/help_support_screen.dart';
 import 'package:cmms/widgets/responsive_screen_wrapper.dart';
-import 'package:cmms/services/notification_service.dart';
+//import 'package:cmms/services/notification_service.dart';
 import 'package:logger/logger.dart';
 
 class SettingsScreen extends StatefulWidget {

@@ -1,6 +1,6 @@
 import 'package:cmms/models/task_status_model.dart';
-import 'package:cmms/models/maintenance_task_model.dart';
-import 'package:cmms/models/notification_model.dart';
+import 'package:cmms/notifications/models/maintenance_task_model.dart';
+import 'package:cmms/notifications/models/notification_model.dart';
 
 class TaskDisplayModel {
   final String taskId;
