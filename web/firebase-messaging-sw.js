@@ -1,5 +1,8 @@
-importScripts("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js")
-importScripts("https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js")
+importScripts("https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js")
+importScripts("https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js")
+
+// Declare the firebase variable
+const firebase = self.firebase
 
 // Initialize Firebase
 const firebaseApp = firebase.initializeApp({
@@ -64,7 +67,6 @@ messaging.onBackgroundMessage((payload) => {
 // Handle notification clicks
 self.addEventListener("notificationclick", (event) => {
   console.log("[firebase-messaging-sw.js] Notification click received.")
-
   event.notification.close()
 
   // Reset notification count
@@ -120,7 +122,6 @@ self.addEventListener("notificationclose", (event) => {
 // Handle push events for better reliability
 self.addEventListener("push", (event) => {
   console.log("[firebase-messaging-sw.js] Push event received.")
-
   if (event.data) {
     try {
       const payload = event.data.json()

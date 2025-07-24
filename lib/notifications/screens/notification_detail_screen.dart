@@ -30,7 +30,14 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
     _markAsReadIfNeeded();
   }
 
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
   Future<void> _markAsReadIfNeeded() async {
+    if (!mounted) return;
+    
     final user = FirebaseAuth.instance.currentUser;
     if (user != null && widget.notification.isTriggered) {
       try {
@@ -38,9 +45,12 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
           widget.notification.id,
           user.uid,
         );
-        setState(() {
-          _isMarkedAsRead = true;
-        });
+        
+        if (mounted) {
+          setState(() {
+            _isMarkedAsRead = true;
+          });
+        }
       } catch (e) {
         _logger.e('Error marking notification as read: $e');
       }
@@ -52,13 +62,13 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
     final categories = widget.notification.notifications.map((n) => n.category).toSet().toList();
     final now = DateTime.now();
     final isOverdue = widget.notification.notificationDate.isBefore(now) && !widget.notification.isTriggered;
-    final isDueToday = DateFormat.yMd().format(widget.notification.notificationDate) == 
-                      DateFormat.yMd().format(now);
-    
+    final isDueToday = DateFormat.yMd().format(widget.notification.notificationDate) ==
+                       DateFormat.yMd().format(now);
+        
     Color statusColor;
     String statusText;
     IconData statusIcon;
-    
+        
     if (widget.notification.isTriggered) {
       if (widget.notification.readByUsers.isNotEmpty || _isMarkedAsRead) {
         statusColor = Colors.green;
@@ -144,7 +154,7 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    
+                                        
                     Row(
                       children: [
                         _buildInfoChip(
@@ -170,7 +180,6 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 16),
 
             // Timeline Card
@@ -191,7 +200,7 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      
+                                            
                       _buildTimelineItem(
                         'Scheduled',
                         DateFormat.yMMMd().add_jm().format(widget.notification.notificationDate),
@@ -199,7 +208,7 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                         Colors.blueGrey,
                         isCompleted: true,
                       ),
-                      
+                                            
                       if (widget.notification.triggeredAt != null)
                         _buildTimelineItem(
                           'Sent',
@@ -208,7 +217,7 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                           Colors.blue,
                           isCompleted: true,
                         ),
-                      
+                                            
                       if (widget.notification.readByUsers.isNotEmpty || _isMarkedAsRead)
                         _buildTimelineItem(
                           'Read',
@@ -243,7 +252,7 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    
+                                        
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -251,7 +260,7 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                         final categoryTasks = widget.notification.notifications
                             .where((n) => n.category == category)
                             .toList();
-                        
+                                                
                         return Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           decoration: BoxDecoration(
@@ -294,7 +303,6 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 16),
 
             // Tasks List Card
@@ -314,7 +322,7 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    
+                                        
                     ListView.separated(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
@@ -329,7 +337,6 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 16),
 
             // Read Status Card
@@ -350,7 +357,7 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      
+                                            
                       ListView.separated(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
@@ -364,7 +371,9 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                               child: Icon(Icons.person, color: Colors.green[700]),
                             ),
                             title: Text(
-                              'User ${readInfo.userId.substring(0, 8)}...',
+                              readInfo.userName.isNotEmpty 
+                                  ? readInfo.userName 
+                                  : 'User ${readInfo.userId.substring(0, 8)}...',
                               style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
                             ),
                             subtitle: Text(

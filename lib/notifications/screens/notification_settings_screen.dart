@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:logger/logger.dart';
 import 'package:cmms/notifications/services/notification_service.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({super.key});
@@ -14,13 +13,14 @@ class NotificationSettingsScreen extends StatefulWidget {
 class _NotificationSettingsScreenState extends State<NotificationSettingsScreen> {
   final Logger _logger = Logger(printer: PrettyPrinter());
   final NotificationService _notificationService = NotificationService();
-  
+
   bool _notificationsEnabled = true;
   bool _autoNotificationsEnabled = false;
   bool _soundEnabled = true;
   bool _vibrationEnabled = true;
   bool _screenWakeEnabled = true;
   bool _isLoading = true;
+  bool _isUpdatingAuto = false;
 
   @override
   void initState() {
@@ -30,14 +30,12 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
 
   Future<void> _loadSettings() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      
       final notificationsEnabled = await _notificationService.areNotificationsEnabled();
       final autoNotificationsEnabled = await _notificationService.areAutoNotificationsEnabled();
-      final soundEnabled = prefs.getBool('notification_sound_enabled') ?? true;
-      final vibrationEnabled = prefs.getBool('notification_vibration_enabled') ?? true;
-      final screenWakeEnabled = prefs.getBool('notification_screen_wake_enabled') ?? true;
-      
+      final soundEnabled = await _notificationService.isSoundEnabled();
+      final vibrationEnabled = await _notificationService.isVibrationEnabled();
+      final screenWakeEnabled = await _notificationService.isScreenWakeEnabled();
+
       if (mounted) {
         setState(() {
           _notificationsEnabled = notificationsEnabled;
@@ -64,10 +62,10 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
       setState(() {
         _notificationsEnabled = enabled;
       });
-      
+
       _showSnackBar(
         enabled 
-            ? 'Notifications enabled' 
+            ? 'Notifications enabled'
             : 'Notifications disabled',
         enabled ? Colors.green : Colors.orange,
       );
@@ -78,38 +76,64 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
   }
 
   Future<void> _updateAutoNotificationsEnabled(bool enabled) async {
+    if (_isUpdatingAuto) return;
+    
+    setState(() {
+      _isUpdatingAuto = true;
+    });
+
     try {
       await _notificationService.setAutoNotificationsEnabled(enabled);
-      setState(() {
-        _autoNotificationsEnabled = enabled;
-      });
       
-      _showSnackBar(
-        enabled 
-            ? 'Automatic notifications enabled' 
-            : 'Automatic notifications disabled',
-        enabled ? Colors.green : Colors.orange,
-      );
+      // Add a small delay to prevent rapid toggling
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      if (mounted) {
+        setState(() {
+          _autoNotificationsEnabled = enabled;
+          _isUpdatingAuto = false;
+        });
+
+        _showSnackBar(
+          enabled 
+              ? 'Automatic notifications enabled - system will generate continuous maintenance reminders'
+              : 'Automatic notifications disabled',
+          enabled ? Colors.green : Colors.orange,
+        );
+      }
     } catch (e) {
       _logger.e('Error updating auto notifications: $e');
-      _showSnackBar('Error updating automatic notifications: $e', Colors.red);
+      if (mounted) {
+        setState(() {
+          _isUpdatingAuto = false;
+        });
+        _showSnackBar('Error updating automatic notifications: $e', Colors.red);
+      }
     }
   }
 
   Future<void> _updateSoundEnabled(bool enabled) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('notification_sound_enabled', enabled);
+      await _notificationService.setSoundEnabled(enabled);
       setState(() {
         _soundEnabled = enabled;
       });
-      
+
       _showSnackBar(
         enabled 
-            ? 'Notification sound enabled' 
+            ? 'Notification sound enabled'
             : 'Notification sound disabled',
         enabled ? Colors.green : Colors.orange,
       );
+
+      // Play test sound if enabled
+      if (enabled) {
+        await _notificationService.triggerTestNotification(
+          customTitle: 'Sound Test',
+          customBody: 'This is a sound test notification',
+          targetAudience: 'self',
+        );
+      }
     } catch (e) {
       _logger.e('Error updating sound setting: $e');
       _showSnackBar('Error updating sound setting: $e', Colors.red);
@@ -118,18 +142,26 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
 
   Future<void> _updateVibrationEnabled(bool enabled) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('notification_vibration_enabled', enabled);
+      await _notificationService.setVibrationEnabled(enabled);
       setState(() {
         _vibrationEnabled = enabled;
       });
-      
+
       _showSnackBar(
         enabled 
-            ? 'Notification vibration enabled' 
+            ? 'Notification vibration enabled'
             : 'Notification vibration disabled',
         enabled ? Colors.green : Colors.orange,
       );
+
+      // Test vibration if enabled
+      if (enabled) {
+        await _notificationService.triggerTestNotification(
+          customTitle: 'Vibration Test',
+          customBody: 'This is a vibration test notification',
+          targetAudience: 'self',
+        );
+      }
     } catch (e) {
       _logger.e('Error updating vibration setting: $e');
       _showSnackBar('Error updating vibration setting: $e', Colors.red);
@@ -138,15 +170,14 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
 
   Future<void> _updateScreenWakeEnabled(bool enabled) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('notification_screen_wake_enabled', enabled);
+      await _notificationService.setScreenWakeEnabled(enabled);
       setState(() {
         _screenWakeEnabled = enabled;
       });
-      
+
       _showSnackBar(
         enabled 
-            ? 'Screen wake enabled for urgent notifications' 
+            ? 'Screen wake enabled for urgent notifications'
             : 'Screen wake disabled',
         enabled ? Colors.green : Colors.orange,
       );
@@ -206,6 +237,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
         SnackBar(
           content: Text(message, style: GoogleFonts.poppins()),
           backgroundColor: color,
+          duration: const Duration(seconds: 3),
         ),
       );
     }
@@ -243,7 +275,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Configure how you receive maintenance notifications',
+                    'Configure how you receive maintenance notifications and alerts',
                     style: GoogleFonts.poppins(
                       color: Colors.grey[600],
                       fontSize: 14,
@@ -274,31 +306,35 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                             ],
                           ),
                           const SizedBox(height: 16),
-                          
+
                           _buildSettingTile(
                             title: 'Enable Notifications',
-                            subtitle: 'Receive maintenance task notifications',
+                            subtitle: 'Receive maintenance task notifications and alerts',
                             value: _notificationsEnabled,
                             onChanged: _updateNotificationsEnabled,
                             icon: Icons.notifications,
                             iconColor: Colors.blue,
                           ),
-                          
+
                           const Divider(),
-                          
+
                           _buildSettingTile(
                             title: 'Automatic Notifications',
-                            subtitle: 'Automatically schedule notifications for all tasks',
+                            subtitle: _isUpdatingAuto 
+                                ? 'Updating automatic notifications...'
+                                : 'Automatically schedule notifications for all maintenance tasks',
                             value: _autoNotificationsEnabled,
-                            onChanged: _notificationsEnabled ? _updateAutoNotificationsEnabled : null,
+                            onChanged: _notificationsEnabled && !_isUpdatingAuto 
+                                ? _updateAutoNotificationsEnabled 
+                                : null,
                             icon: Icons.autorenew,
                             iconColor: Colors.green,
+                            isLoading: _isUpdatingAuto,
                           ),
                         ],
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 16),
 
                   // Device Settings Card
@@ -324,32 +360,32 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                             ],
                           ),
                           const SizedBox(height: 16),
-                          
+
                           _buildSettingTile(
-                            title: 'Sound',
-                            subtitle: 'Play sound when notifications arrive',
+                            title: 'Sound Notifications',
+                            subtitle: 'Play sound when notifications arrive (includes test sound)',
                             value: _soundEnabled,
                             onChanged: _notificationsEnabled ? _updateSoundEnabled : null,
                             icon: Icons.volume_up,
                             iconColor: Colors.orange,
                           ),
-                          
+
                           const Divider(),
-                          
+
                           _buildSettingTile(
                             title: 'Vibration',
-                            subtitle: 'Vibrate device for notifications',
+                            subtitle: 'Vibrate device for notifications (includes test vibration)',
                             value: _vibrationEnabled,
                             onChanged: _notificationsEnabled ? _updateVibrationEnabled : null,
                             icon: Icons.vibration,
                             iconColor: Colors.purple,
                           ),
-                          
+
                           const Divider(),
-                          
+
                           _buildSettingTile(
                             title: 'Screen Wake',
-                            subtitle: 'Wake screen for urgent notifications',
+                            subtitle: 'Wake screen for urgent notifications and alerts',
                             value: _screenWakeEnabled,
                             onChanged: _notificationsEnabled ? _updateScreenWakeEnabled : null,
                             icon: Icons.screen_lock_portrait,
@@ -359,7 +395,6 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 16),
 
                   // Actions Card
@@ -385,7 +420,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                             ],
                           ),
                           const SizedBox(height: 16),
-                          
+
                           ListTile(
                             leading: Container(
                               padding: const EdgeInsets.all(8),
@@ -412,9 +447,9 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                               child: Text('Reset', style: GoogleFonts.poppins()),
                             ),
                           ),
-                          
+
                           const Divider(),
-                          
+
                           ListTile(
                             leading: Container(
                               padding: const EdgeInsets.all(8),
@@ -445,10 +480,9 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 24),
 
-                  // Information Card
+                  // Enhanced Information Card
                   Card(
                     elevation: 2,
                     color: Colors.blue[50],
@@ -462,7 +496,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
-                                  'About Notifications',
+                                  'Enhanced Notification System',
                                   style: GoogleFonts.poppins(
                                     fontWeight: FontWeight.bold,
                                     color: Colors.blue[700],
@@ -473,11 +507,14 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            '• Notifications are sent at 9:00 AM, with a retry at 11:00 AM if needed\n'
-                            '• Automatic notifications create a continuous cycle based on task frequencies\n'
-                            '• Notifications work like WhatsApp - they appear on your status bar and wake your screen\n'
-                            '• All users receive notifications, not just technicians\n'
-                            '• Offline notifications will appear when you come back online',
+                            '• Notifications are sent 5 days before maintenance is due\n'
+                            '• Alerts are sent 1 day before maintenance is due\n'
+                            '• Automatic notifications cycle continuously based on task frequencies\n'
+                            '• Custom notifications auto-delete 2 days after due date\n'
+                            '• Persistent banners show for urgent and overdue notifications\n'
+                            '• Sound and vibration patterns vary by priority level\n'
+                            '• All users receive notifications with read tracking\n'
+                            '• Background processing ensures notifications work when app is closed',
                             style: GoogleFonts.poppins(
                               fontSize: 13,
                               color: Colors.blue[700],
@@ -500,6 +537,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
     required Function(bool)? onChanged,
     required IconData icon,
     required Color iconColor,
+    bool isLoading = false,
   }) {
     return ListTile(
       leading: Container(
@@ -508,7 +546,16 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
           color: iconColor.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(icon, color: iconColor),
+        child: isLoading 
+            ? SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(iconColor),
+                ),
+              )
+            : Icon(icon, color: iconColor),
       ),
       title: Text(
         title,
